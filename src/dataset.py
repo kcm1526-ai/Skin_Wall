@@ -113,10 +113,11 @@ class DICOMLoader:
         slices = []
         for f in dicom_files:
             try:
-                dcm = pydicom.dcmread(f)
+                # Use force=True to read files without .dcm extension
+                dcm = pydicom.dcmread(f, force=True)
                 if hasattr(dcm, 'pixel_array'):
                     slices.append(dcm)
-            except:
+            except Exception:
                 continue
 
         if not slices:
