@@ -595,18 +595,30 @@ def custom_collate_fn(batch):
     if len(batch) == 0:
         return None
 
-    # Check if batch contains lists (from RandCropByPosNegLabeld)
-    if isinstance(batch[0].get('image'), list):
-        # Flatten the list of patches
-        flattened = []
-        for item in batch:
-            for i in range(len(item['image'])):
-                flattened.append({
-                    'image': item['image'][i],
-                    'label': item['label'][i],
-                    'subject_id': item['subject_id']
-                })
-        batch = flattened
+    # Flatten if batch contains lists (from RandCropByPosNegLabeld which returns list of dicts)
+    flattened = []
+    for item in batch:
+        if isinstance(item, list):
+            # RandCropByPosNegLabeld returns a list of dicts
+            flattened.extend(item)
+        elif isinstance(item, dict):
+            # Check if the dict contains lists of patches
+            if isinstance(item.get('image'), list):
+                for i in range(len(item['image'])):
+                    flattened.append({
+                        'image': item['image'][i],
+                        'label': item['label'][i],
+                        'subject_id': item.get('subject_id', 'unknown')
+                    })
+            else:
+                flattened.append(item)
+        else:
+            continue
+
+    if len(flattened) == 0:
+        return None
+
+    batch = flattened
 
     # Stack tensors
     images = torch.stack([b['image'] if isinstance(b['image'], torch.Tensor)
@@ -617,7 +629,7 @@ def custom_collate_fn(batch):
     return {
         'image': images,
         'label': labels,
-        'subject_id': [b['subject_id'] for b in batch]
+        'subject_id': [b.get('subject_id', 'unknown') for b in batch]
     }
 
 
