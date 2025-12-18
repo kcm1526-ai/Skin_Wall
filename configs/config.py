@@ -129,8 +129,11 @@ class TrainConfig:
     # Output directory
     output_dir: str = "./outputs"
 
+    # GPU configuration
+    gpu_ids: str = "2,3,4,5"  # GPU device IDs to use
+
     # Training parameters
-    batch_size: int = 2
+    batch_size: int = 2  # Per GPU batch size (effective batch = batch_size * num_gpus * accumulation_steps)
     num_epochs: int = 500
     num_workers: int = 8
 

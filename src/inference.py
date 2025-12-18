@@ -447,8 +447,8 @@ def parse_args():
                         help='Compute metrics (requires ground truth)')
     parser.add_argument('--no-tta', action='store_true',
                         help='Disable test-time augmentation')
-    parser.add_argument('--gpu', type=str, default='0',
-                        help='GPU device ID')
+    parser.add_argument('--gpu', type=str, default='2',
+                        help='GPU device ID (default: 2)')
 
     return parser.parse_args()
 

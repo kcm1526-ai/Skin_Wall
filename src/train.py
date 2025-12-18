@@ -556,8 +556,8 @@ def parse_args():
                         help='Learning rate')
     parser.add_argument('--resume', type=str, default=None,
                         help='Path to checkpoint to resume from')
-    parser.add_argument('--gpu', type=str, default='0',
-                        help='GPU device IDs')
+    parser.add_argument('--gpu', type=str, default='2,3,4,5',
+                        help='GPU device IDs (default: 2,3,4,5)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
 

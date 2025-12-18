@@ -6,7 +6,7 @@ MODEL="swin_unetr"
 EPOCHS=500
 BATCH_SIZE=2
 LR=1e-4
-GPU="0"
+GPU="2,3,4,5"
 EXP_NAME=""
 OUTPUT_DIR="./outputs"
 
