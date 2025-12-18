@@ -550,7 +550,7 @@ class UNetDecoder3D(nn.Module):
         if use_deep_supervision:
             self.deep_heads = nn.ModuleList([
                 nn.Conv3d(f, out_channels, kernel_size=1)
-                for f in reversed_features[:-1]
+                for f in reversed_features[1:]  # Match decoder output channels
             ])
 
     def forward(
