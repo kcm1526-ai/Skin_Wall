@@ -55,17 +55,19 @@ class DICOMLoader:
                     continue
                 # Check if it's a DICOM file
                 try:
-                    dcm = pydicom.dcmread(file_path, stop_before_pixels=True)
-                    if hasattr(dcm, 'pixel_array') or hasattr(dcm, 'PixelData'):
+                    # Use force=True to read files without .dcm extension or DICOM preamble
+                    dcm = pydicom.dcmread(file_path, stop_before_pixels=True, force=True)
+                    # Check for essential DICOM attributes (PixelData may not show with stop_before_pixels)
+                    if hasattr(dcm, 'SOPClassUID') or hasattr(dcm, 'Modality') or hasattr(dcm, 'PixelData'):
                         dicom_files.append(file_path)
-                except:
-                    # Try loading with SimpleITK
+                except Exception:
+                    # Try loading with SimpleITK as fallback
                     try:
                         reader = sitk.ImageFileReader()
                         reader.SetFileName(file_path)
                         reader.ReadImageInformation()
                         dicom_files.append(file_path)
-                    except:
+                    except Exception:
                         continue
 
         if not dicom_files:
