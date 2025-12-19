@@ -323,8 +323,13 @@ class CombinedLoss(nn.Module):
             )
 
         if ce_weight > 0:
-            weight = torch.tensor(class_weights) if class_weights else None
-            self.losses['ce'] = nn.CrossEntropyLoss(weight=weight)
+            # Register class weights as buffer so they move with .to(device)
+            if class_weights:
+                self.register_buffer('ce_class_weights', torch.tensor(class_weights))
+            else:
+                self.register_buffer('ce_class_weights', None)
+            # CE loss will be created with weights in forward pass
+            self._ce_loss_fn = None
 
         if focal_weight > 0:
             self.losses['focal'] = FocalLoss(
@@ -363,14 +368,21 @@ class CombinedLoss(nn.Module):
         # Handle target shape for CE loss
         target_ce = target.squeeze(1).long() if target.dim() == 5 else target.long()
 
-        for name, loss_fn in self.losses.items():
+        for name, weight in self.weights.items():
+            if weight <= 0:
+                continue
+
             if name == 'ce':
-                loss = loss_fn(pred, target_ce)
-            else:
+                # Use CrossEntropyLoss with weights on correct device
+                loss = F.cross_entropy(pred, target_ce, weight=self.ce_class_weights)
+            elif name in self.losses:
+                loss_fn = self.losses[name]
                 loss = loss_fn(pred, target)
+            else:
+                continue
 
             loss_dict[name] = loss.item()
-            total_loss = total_loss + self.weights[name] * loss
+            total_loss = total_loss + weight * loss
 
         return total_loss, loss_dict
 
