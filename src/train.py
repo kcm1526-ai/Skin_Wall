@@ -5,6 +5,12 @@ Implements best practices for achieving high Dice scores
 
 import os
 import sys
+
+# Set default GPU devices BEFORE importing torch
+# This must be done before any CUDA initialization
+if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+    os.environ['CUDA_VISIBLE_DEVICES'] = '2,3,4,5'
+
 import time
 import argparse
 import logging
@@ -568,8 +574,9 @@ def main():
     """Main entry point"""
     args = parse_args()
 
-    # Set GPU
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+    # Note: CUDA_VISIBLE_DEVICES is set at the top of this file before torch import
+    # If --gpu is specified differently, user should set CUDA_VISIBLE_DEVICES env var before running
+    print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
 
     # Set random seed
     torch.manual_seed(args.seed)
@@ -580,6 +587,10 @@ def main():
     # Get device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    if torch.cuda.is_available():
+        print(f"Number of GPUs available: {torch.cuda.device_count()}")
+        for i in range(torch.cuda.device_count()):
+            print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
 
     # Load config
     config = get_config(args.model)
