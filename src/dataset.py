@@ -341,10 +341,12 @@ class SkinWallDataset(Dataset):
             return None
 
         try:
-            data = np.load(cache_path)
-            image = data['image']
-            skin_mask = data['skin_mask']
-            abdominal_mask = data['abdominal_mask']
+            # Use mmap_mode='r' for memory-mapped reading (much faster, no RAM bloat)
+            data = np.load(cache_path, mmap_mode='r')
+            # Copy to regular arrays for processing (mmap arrays can be slow for random access)
+            image = np.array(data['image'])
+            skin_mask = np.array(data['skin_mask'])
+            abdominal_mask = np.array(data['abdominal_mask'])
             spacing = tuple(data['spacing'])
 
             # Ensure masks have same shape as image
@@ -429,13 +431,9 @@ class SkinWallDataset(Dataset):
         return resampled_mask.astype(np.uint8)
 
     def __getitem__(self, idx: int) -> Dict:
-        # Check cache
-        if self.cache and idx in self.cached_data:
-            data = self.cached_data[idx].copy()
-        else:
-            data = self._load_sample(idx)
-            if self.cache:
-                self.cached_data[idx] = data.copy()
+        # Load sample (OS file cache handles caching, no need for in-memory cache
+        # which bloats RAM and doesn't share across workers)
+        data = self._load_sample(idx)
 
         # Preprocess
         data = self._preprocess(data)
