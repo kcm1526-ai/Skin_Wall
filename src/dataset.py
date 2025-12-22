@@ -336,18 +336,34 @@ class SkinWallDataset(Dataset):
 
     def _load_from_numpy_cache(self, subject_id: str) -> Optional[Dict]:
         """Try to load sample from numpy cache."""
-        cache_path = os.path.join(self.numpy_cache_dir, f"{subject_id}.npz")
-        if not os.path.exists(cache_path):
+        # Try .npy first (faster, uncompressed), then .npz (legacy)
+        npy_path = os.path.join(self.numpy_cache_dir, f"{subject_id}.npy")
+        npz_path = os.path.join(self.numpy_cache_dir, f"{subject_id}.npz")
+
+        if os.path.exists(npy_path):
+            cache_path = npy_path
+            use_npy = True
+        elif os.path.exists(npz_path):
+            cache_path = npz_path
+            use_npy = False
+        else:
             return None
 
         try:
-            # Use mmap_mode='r' for memory-mapped reading (much faster, no RAM bloat)
-            data = np.load(cache_path, mmap_mode='r')
-            # Copy to regular arrays for processing (mmap arrays can be slow for random access)
-            image = np.array(data['image'])
-            skin_mask = np.array(data['skin_mask'])
-            abdominal_mask = np.array(data['abdominal_mask'])
-            spacing = tuple(data['spacing'])
+            if use_npy:
+                # .npy format - load dict directly (fastest)
+                data = np.load(cache_path, allow_pickle=True).item()
+                image = data['image']
+                skin_mask = data['skin_mask']
+                abdominal_mask = data['abdominal_mask']
+                spacing = tuple(data['spacing'])
+            else:
+                # .npz format - use mmap for memory efficiency
+                data = np.load(cache_path, mmap_mode='r')
+                image = np.array(data['image'])
+                skin_mask = np.array(data['skin_mask'])
+                abdominal_mask = np.array(data['abdominal_mask'])
+                spacing = tuple(data['spacing'])
 
             # Ensure masks have same shape as image
             if skin_mask.shape != image.shape:
