@@ -317,20 +317,70 @@ class SkinWallDataset(Dataset):
         self.cache = cache
         self.cached_data = {}
 
+        # Check for numpy cache directory
+        self.numpy_cache_dir = os.path.join(config.data.base_path, '_numpy_cache')
+        self.use_numpy_cache = os.path.isdir(self.numpy_cache_dir)
+        if self.use_numpy_cache:
+            logger.info(f"Using numpy cache from {self.numpy_cache_dir}")
+        else:
+            logger.info(f"No numpy cache found. Run 'python scripts/precache_data.py' for faster loading.")
+
         logger.info(f"Initialized {mode} dataset with {len(data_list)} samples")
 
     def __len__(self) -> int:
         return len(self.data_list)
 
+    def _load_from_numpy_cache(self, subject_id: str) -> Optional[Dict]:
+        """Try to load sample from numpy cache."""
+        cache_path = os.path.join(self.numpy_cache_dir, f"{subject_id}.npz")
+        if not os.path.exists(cache_path):
+            return None
+
+        try:
+            data = np.load(cache_path)
+            image = data['image']
+            skin_mask = data['skin_mask']
+            abdominal_mask = data['abdominal_mask']
+            spacing = tuple(data['spacing'])
+
+            # Ensure masks have same shape as image
+            if skin_mask.shape != image.shape:
+                skin_mask = self._align_mask_to_image(skin_mask, image.shape)
+            if abdominal_mask.shape != image.shape:
+                abdominal_mask = self._align_mask_to_image(abdominal_mask, image.shape)
+
+            # Combine masks: 0=background, 1=skin, 2=abdominal_wall
+            combined_mask = np.zeros_like(image, dtype=np.uint8)
+            combined_mask[skin_mask > 0] = 1
+            combined_mask[abdominal_mask > 0] = 2
+
+            return {
+                'image': image,
+                'label': combined_mask,
+                'spacing': spacing,
+                'subject_id': subject_id
+            }
+        except Exception as e:
+            logger.warning(f"Failed to load from cache for {subject_id}: {e}")
+            return None
+
     def _load_sample(self, idx: int) -> Dict:
         """Load and preprocess a single sample"""
         sample = self.data_list[idx]
+        subject_id = sample['subject_id']
 
+        # Try numpy cache first (much faster)
+        if self.use_numpy_cache:
+            cached = self._load_from_numpy_cache(subject_id)
+            if cached is not None:
+                return cached
+
+        # Fall back to DICOM loading
         # Load DICOM images
         try:
             image, image_meta = DICOMLoader.load_dicom_series(sample['image_dir'])
         except Exception as e:
-            logger.error(f"Error loading DICOM for {sample['subject_id']}: {e}")
+            logger.error(f"Error loading DICOM for {subject_id}: {e}")
             raise
 
         # Load masks
@@ -338,7 +388,7 @@ class SkinWallDataset(Dataset):
             skin_mask, _ = MaskLoader.load_nifti_mask(sample['skin_mask'])
             abdominal_mask, _ = MaskLoader.load_nifti_mask(sample['abdominal_wall_mask'])
         except Exception as e:
-            logger.error(f"Error loading masks for {sample['subject_id']}: {e}")
+            logger.error(f"Error loading masks for {subject_id}: {e}")
             raise
 
         # Ensure masks have same shape as image
@@ -358,7 +408,7 @@ class SkinWallDataset(Dataset):
             'image': image,
             'label': combined_mask,
             'spacing': image_meta['spacing'],
-            'subject_id': sample['subject_id']
+            'subject_id': subject_id
         }
 
     def _align_mask_to_image(self, mask: np.ndarray, target_shape: Tuple) -> np.ndarray:
@@ -557,13 +607,17 @@ def create_dataloaders(config, num_workers: int = 8):
     )
 
     # Create dataloaders
+    # persistent_workers=True keeps workers alive between epochs (avoids reload)
+    # prefetch_factor controls how many batches each worker prefetches
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.train.batch_size,
         shuffle=True,
         num_workers=num_workers,
         pin_memory=True,
-        collate_fn=custom_collate_fn
+        collate_fn=custom_collate_fn,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None
     )
 
     val_loader = DataLoader(
@@ -572,7 +626,9 @@ def create_dataloaders(config, num_workers: int = 8):
         shuffle=False,
         num_workers=num_workers,
         pin_memory=True,
-        collate_fn=custom_collate_fn
+        collate_fn=custom_collate_fn,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None
     )
 
     test_loader = DataLoader(
@@ -581,7 +637,9 @@ def create_dataloaders(config, num_workers: int = 8):
         shuffle=False,
         num_workers=num_workers,
         pin_memory=True,
-        collate_fn=custom_collate_fn
+        collate_fn=custom_collate_fn,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None
     )
 
     return train_loader, val_loader, test_loader
