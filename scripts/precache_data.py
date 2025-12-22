@@ -24,10 +24,11 @@ from src.dataset import DICOMLoader, MaskLoader, find_data_paths
 def process_sample(sample: dict, cache_dir: str) -> dict:
     """Process a single sample and save to cache."""
     subject_id = sample['subject_id']
-    cache_path = os.path.join(cache_dir, f"{subject_id}.npz")
+    # Use .npy (uncompressed) for faster loading - no decompression overhead
+    cache_path = os.path.join(cache_dir, f"{subject_id}.npy")
 
-    # Skip if already cached
-    if os.path.exists(cache_path):
+    # Skip if already cached (check both .npy and legacy .npz)
+    if os.path.exists(cache_path) or os.path.exists(cache_path.replace('.npy', '.npz')):
         return {'subject_id': subject_id, 'status': 'skipped', 'path': cache_path}
 
     try:
@@ -38,14 +39,14 @@ def process_sample(sample: dict, cache_dir: str) -> dict:
         skin_mask, _ = MaskLoader.load_nifti_mask(sample['skin_mask'])
         abdominal_mask, _ = MaskLoader.load_nifti_mask(sample['abdominal_wall_mask'])
 
-        # Save as compressed numpy
-        np.savez_compressed(
-            cache_path,
-            image=image.astype(np.float32),
-            skin_mask=skin_mask.astype(np.uint8),
-            abdominal_mask=abdominal_mask.astype(np.uint8),
-            spacing=np.array(image_meta['spacing'])
-        )
+        # Save as uncompressed numpy dict (much faster to load than .npz)
+        cache_data = {
+            'image': image.astype(np.float32),
+            'skin_mask': skin_mask.astype(np.uint8),
+            'abdominal_mask': abdominal_mask.astype(np.uint8),
+            'spacing': np.array(image_meta['spacing'])
+        }
+        np.save(cache_path, cache_data, allow_pickle=True)
 
         return {'subject_id': subject_id, 'status': 'cached', 'path': cache_path}
 
