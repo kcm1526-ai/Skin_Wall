@@ -154,9 +154,10 @@ class TrainConfig:
     focal_weight: float = 0.5
     focal_gamma: float = 2.0
 
-    # Class weights for imbalanced data
+    # Class weights for imbalanced data (pre-computed to avoid slow startup)
+    # [background, skin, abdominal_wall] - higher weight = rarer class
     use_class_weights: bool = True
-    class_weights: Optional[List[float]] = None  # Auto-computed if None
+    class_weights: Optional[List[float]] = field(default_factory=lambda: [0.115, 0.075, 2.81])
 
     # Gradient accumulation
     accumulation_steps: int = 4

@@ -214,6 +214,10 @@ def find_data_paths(base_path: str, config) -> List[Dict]:
 
         subject_id = os.path.basename(subject_dir)
 
+        # Skip cache and hidden directories
+        if subject_id.startswith('_') or subject_id.startswith('.'):
+            continue
+
         # Find image directory
         image_dir = os.path.join(subject_dir, config.data.image_subpath)
         if not os.path.isdir(image_dir):
