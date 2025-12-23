@@ -156,8 +156,9 @@ class TrainConfig:
 
     # Class weights for imbalanced data (pre-computed to avoid slow startup)
     # [background, skin, abdominal_wall] - higher weight = rarer class
+    # Setting to balanced weights - let Dice loss handle class imbalance instead
     use_class_weights: bool = True
-    class_weights: Optional[List[float]] = field(default_factory=lambda: [0.115, 0.075, 2.81])
+    class_weights: Optional[List[float]] = field(default_factory=lambda: [1.0, 1.0, 1.0])
 
     # Gradient accumulation
     accumulation_steps: int = 4
