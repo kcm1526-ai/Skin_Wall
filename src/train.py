@@ -441,11 +441,14 @@ class Trainer:
             if (epoch + 1) % self.config.train.val_every_n_epochs == 0:
                 val_metrics = self.validate(epoch)
 
-                # Log metrics
+                # Log metrics with per-class dice
+                skin_dice = val_metrics.get('dice_class_1', 0)
+                wall_dice = val_metrics.get('dice_class_2', 0)
                 self.logger.info(
                     f"Epoch {epoch} - Train Loss: {train_metrics['loss']:.4f}, "
                     f"Val Loss: {val_metrics['loss']:.4f}, "
-                    f"Mean Dice: {val_metrics.get('mean_dice', 0):.4f}"
+                    f"Mean Dice: {val_metrics.get('mean_dice', 0):.4f} "
+                    f"[Skin: {skin_dice:.4f}, Wall: {wall_dice:.4f}]"
                 )
 
                 # Check for best model
