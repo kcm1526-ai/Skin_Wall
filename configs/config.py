@@ -139,25 +139,26 @@ class TrainConfig:
 
     # Optimizer
     optimizer: str = "adamw"  # "adam", "adamw", "sgd"
-    learning_rate: float = 1e-4
+    learning_rate: float = 2e-4  # Increased from 1e-4
     weight_decay: float = 1e-5
 
     # Learning rate scheduler
     scheduler: str = "cosine_warmup"  # "cosine", "cosine_warmup", "step", "reduce_on_plateau"
-    warmup_epochs: int = 10
+    warmup_epochs: int = 5  # Reduced from 10
     min_lr: float = 1e-6
 
-    # Loss function
-    loss_type: str = "dice_ce_focal"  # "dice", "ce", "dice_ce", "dice_focal", "dice_ce_focal"
+    # Loss function - simplified to Dice + CE only
+    loss_type: str = "dice_ce"  # Removed focal - can cause instability
     dice_weight: float = 1.0
-    ce_weight: float = 1.0
-    focal_weight: float = 0.5
+    ce_weight: float = 0.5  # Reduced CE weight, let Dice dominate
+    focal_weight: float = 0.0  # Disabled
     focal_gamma: float = 2.0
 
     # Class weights for imbalanced data (pre-computed to avoid slow startup)
     # [background, skin, abdominal_wall] - higher weight = rarer class
+    # Setting to balanced weights - let Dice loss handle class imbalance instead
     use_class_weights: bool = True
-    class_weights: Optional[List[float]] = field(default_factory=lambda: [0.115, 0.075, 2.81])
+    class_weights: Optional[List[float]] = field(default_factory=lambda: [1.0, 1.0, 1.0])
 
     # Gradient accumulation
     accumulation_steps: int = 4
