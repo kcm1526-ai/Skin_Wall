@@ -304,7 +304,8 @@ class SkinWallDataset(Dataset):
         config,
         mode: str = 'train',
         transform=None,
-        cache: bool = True
+        cache: bool = True,
+        training_mode: str = 'both'
     ):
         """
         Args:
@@ -313,6 +314,7 @@ class SkinWallDataset(Dataset):
             mode: 'train', 'val', or 'test'
             transform: Optional custom transforms
             cache: Whether to cache loaded data
+            training_mode: 'both' (3-class), 'skin' (2-class), or 'wall' (2-class)
         """
         self.data_list = data_list
         self.config = config
@@ -320,6 +322,7 @@ class SkinWallDataset(Dataset):
         self.transform = transform
         self.cache = cache
         self.cached_data = {}
+        self.training_mode = training_mode  # 'both', 'skin', or 'wall'
 
         # Check for numpy cache directory
         self.numpy_cache_dir = os.path.join(config.data.base_path, '_numpy_cache')
@@ -371,10 +374,10 @@ class SkinWallDataset(Dataset):
             if abdominal_mask.shape != image.shape:
                 abdominal_mask = self._align_mask_to_image(abdominal_mask, image.shape)
 
-            # Combine masks: 0=background, 1=skin, 2=abdominal_wall
-            combined_mask = np.zeros_like(image, dtype=np.uint8)
-            combined_mask[skin_mask > 0] = 1
-            combined_mask[abdominal_mask > 0] = 2
+            # Create combined mask based on training mode
+            combined_mask = self._create_combined_mask(
+                image.shape, skin_mask, abdominal_mask
+            )
 
             return {
                 'image': image,
@@ -421,10 +424,10 @@ class SkinWallDataset(Dataset):
         if abdominal_mask.shape != image.shape:
             abdominal_mask = self._align_mask_to_image(abdominal_mask, image.shape)
 
-        # Combine masks: 0=background, 1=skin, 2=abdominal_wall
-        combined_mask = np.zeros_like(image, dtype=np.uint8)
-        combined_mask[skin_mask > 0] = 1
-        combined_mask[abdominal_mask > 0] = 2
+        # Create combined mask based on training mode
+        combined_mask = self._create_combined_mask(
+            image.shape, skin_mask, abdominal_mask
+        )
 
         return {
             'image': image,
@@ -460,6 +463,40 @@ class SkinWallDataset(Dataset):
         resampled_mask = zoom(mask.astype(np.float32), zoom_factors, order=0)
 
         return resampled_mask.astype(np.uint8)
+
+    def _create_combined_mask(
+        self,
+        shape: Tuple,
+        skin_mask: np.ndarray,
+        abdominal_mask: np.ndarray
+    ) -> np.ndarray:
+        """
+        Create combined mask based on training mode.
+
+        Args:
+            shape: Target shape for the mask
+            skin_mask: Binary mask for skin (1 where skin present)
+            abdominal_mask: Binary mask for abdominal wall (1 where wall present)
+
+        Returns:
+            Combined mask with appropriate labels based on training_mode:
+            - 'both': 0=background, 1=skin, 2=abdominal_wall (3-class)
+            - 'skin': 0=background, 1=skin (2-class binary)
+            - 'wall': 0=background, 1=abdominal_wall (2-class binary)
+        """
+        combined_mask = np.zeros(shape, dtype=np.uint8)
+
+        if self.training_mode == 'skin':
+            # Binary segmentation: skin only
+            combined_mask[skin_mask > 0] = 1
+        elif self.training_mode == 'wall':
+            # Binary segmentation: abdominal wall only
+            combined_mask[abdominal_mask > 0] = 1
+        else:  # 'both' - default 3-class segmentation
+            combined_mask[skin_mask > 0] = 1
+            combined_mask[abdominal_mask > 0] = 2
+
+        return combined_mask
 
     def __getitem__(self, idx: int) -> Dict:
         # Load sample (OS file cache handles caching, no need for in-memory cache
@@ -593,13 +630,14 @@ def get_transforms(config, mode: str = 'train'):
     return transforms
 
 
-def create_dataloaders(config, num_workers: int = 8):
+def create_dataloaders(config, num_workers: int = 8, training_mode: str = 'both'):
     """
     Create train, validation, and test dataloaders
 
     Args:
         config: Configuration object
         num_workers: Number of data loading workers
+        training_mode: 'both' (3-class), 'skin' (2-class), or 'wall' (2-class)
 
     Returns:
         Tuple of (train_loader, val_loader, test_loader)
@@ -624,19 +662,20 @@ def create_dataloaders(config, num_workers: int = 8):
     )
 
     logger.info(f"Data split: Train={len(train_samples)}, Val={len(val_samples)}, Test={len(test_samples)}")
+    logger.info(f"Training mode: {training_mode}")
 
     # Create datasets
     train_transforms = get_transforms(config, mode='train')
     val_transforms = get_transforms(config, mode='val')
 
     train_dataset = SkinWallDataset(
-        train_samples, config, mode='train', transform=train_transforms
+        train_samples, config, mode='train', transform=train_transforms, training_mode=training_mode
     )
     val_dataset = SkinWallDataset(
-        val_samples, config, mode='val', transform=val_transforms
+        val_samples, config, mode='val', transform=val_transforms, training_mode=training_mode
     )
     test_dataset = SkinWallDataset(
-        test_samples, config, mode='test', transform=val_transforms
+        test_samples, config, mode='test', transform=val_transforms, training_mode=training_mode
     )
 
     # Create dataloaders
