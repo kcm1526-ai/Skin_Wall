@@ -178,7 +178,7 @@ class TrainConfig:
     early_stopping_min_delta: float = 0.001
 
     # Validation
-    val_every_n_epochs: int = 5  # Validate every 5 epochs instead of every epoch
+    val_every_n_epochs: int = 2  # Validate every 2 epochs
 
     # Sliding window inference
     sw_batch_size: int = 8   # Process more patches in parallel
