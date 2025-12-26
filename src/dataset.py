@@ -434,10 +434,25 @@ class SkinWallDataset(Dataset):
         }
 
     def _align_mask_to_image(self, mask: np.ndarray, target_shape: Tuple) -> np.ndarray:
-        """Align mask to image shape through resampling"""
+        """Align mask to image shape through transpose or resampling"""
         if mask.shape == target_shape:
             return mask
 
+        # Check if it's just a transpose issue (same dimensions, different order)
+        # This is common: Image (D, H, W) vs Mask (H, W, D)
+        mask_dims = sorted(mask.shape)
+        target_dims = sorted(target_shape)
+
+        if mask_dims == target_dims:
+            # Find the correct transpose order
+            # Image: (D, H, W), Mask: (H, W, D) -> need to transpose to (D, H, W)
+            # Common case: mask is (512, 512, D) and image is (D, 512, 512)
+            for axes in [(2, 0, 1), (1, 2, 0), (0, 2, 1), (2, 1, 0), (1, 0, 2)]:
+                transposed = np.transpose(mask, axes)
+                if transposed.shape == target_shape:
+                    return transposed
+
+        # If transpose didn't work, fall back to resampling (less ideal)
         # Calculate zoom factors
         zoom_factors = [t / s for t, s in zip(target_shape, mask.shape)]
 
