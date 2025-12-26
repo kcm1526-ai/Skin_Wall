@@ -633,6 +633,9 @@ def main():
         # Binary segmentation: background (0) + target (1)
         config.data.num_classes = 2
         config.model.out_channels = 2
+        # Update class weights for binary classification (must match num_classes)
+        if config.train.class_weights is not None:
+            config.train.class_weights = [1.0, 1.0]
         if training_mode == 'skin':
             config.data.class_names = ["Background", "Skin"]
         else:
