@@ -1,15 +1,21 @@
 """
 Training script for Skin and Abdominal Wall Segmentation
 Implements best practices for achieving high Dice scores
+Supports separate training for skin-only or wall-only segmentation
 """
 
 import os
 import sys
 
-# Set default GPU devices BEFORE importing torch
-# This must be done before any CUDA initialization
-if 'CUDA_VISIBLE_DEVICES' not in os.environ:
-    os.environ['CUDA_VISIBLE_DEVICES'] = '2,3,4,5'
+# Parse GPU argument early, before torch import
+# This is necessary because CUDA_VISIBLE_DEVICES must be set before torch initializes
+def _get_gpu_arg():
+    for i, arg in enumerate(sys.argv):
+        if arg == '--gpu' and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return '2,3,4,5'  # default
+
+os.environ['CUDA_VISIBLE_DEVICES'] = _get_gpu_arg()
 
 import time
 import argparse
@@ -67,9 +73,10 @@ class Trainer:
     Trainer class for medical image segmentation
     """
 
-    def __init__(self, config: Config, device: torch.device):
+    def __init__(self, config: Config, device: torch.device, training_mode: str = 'both'):
         self.config = config
         self.device = device
+        self.training_mode = training_mode  # 'both', 'skin', or 'wall'
         self.logger = logging.getLogger(__name__)
 
         # Setup directories
@@ -104,10 +111,12 @@ class Trainer:
     def _setup_data(self):
         """Setup data loaders"""
         self.logger.info("Setting up data loaders...")
+        self.logger.info(f"Training mode: {self.training_mode}")
 
         self.train_loader, self.val_loader, self.test_loader = create_dataloaders(
             self.config,
-            num_workers=self.config.train.num_workers
+            num_workers=self.config.train.num_workers,
+            training_mode=self.training_mode
         )
 
         self.logger.info(f"Train batches: {len(self.train_loader)}")
@@ -569,6 +578,9 @@ def parse_args():
                         help='GPU device IDs (default: 2,3,4,5)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
+    parser.add_argument('--mode', type=str, default='both',
+                        choices=['both', 'skin', 'wall'],
+                        help='Training mode: both (3-class), skin (2-class), wall (2-class)')
 
     return parser.parse_args()
 
@@ -603,7 +615,7 @@ def main():
     if args.exp_name:
         config.train.exp_name = args.exp_name
     else:
-        config.train.exp_name = f"{args.model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        config.train.exp_name = f"{args.model}_{args.mode}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     if args.output_dir:
         config.train.output_dir = args.output_dir
     if args.batch_size:
@@ -615,12 +627,25 @@ def main():
     if args.resume:
         config.train.resume_checkpoint = args.resume
 
+    # Handle training mode (skin-only, wall-only, or both)
+    training_mode = args.mode
+    if training_mode in ['skin', 'wall']:
+        # Binary segmentation: background (0) + target (1)
+        config.data.num_classes = 2
+        config.model.out_channels = 2
+        if training_mode == 'skin':
+            config.data.class_names = ["Background", "Skin"]
+        else:
+            config.data.class_names = ["Background", "Wall"]
+    print(f"Training mode: {training_mode} ({config.data.num_classes} classes)")
+
     # Setup logging
     logger = setup_logging(config.train.output_dir, config.train.exp_name)
     logger.info(f"Configuration: {config}")
+    logger.info(f"Training mode: {training_mode}")
 
     # Create trainer and train
-    trainer = Trainer(config, device)
+    trainer = Trainer(config, device, training_mode=training_mode)
     best_dice = trainer.train()
 
     logger.info(f"Training completed. Best Dice: {best_dice:.4f}")
