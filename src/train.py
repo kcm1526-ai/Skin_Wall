@@ -395,14 +395,19 @@ class Trainer:
             images = batch['image'].to(self.device)
             labels = batch['label'].to(self.device)
 
+            # Get the actual model (unwrap DataParallel if needed)
+            model_fn = self.model.module if isinstance(self.model, nn.DataParallel) else self.model
+
             # Sliding window inference for full volumes
-            if MONAI_AVAILABLE and images.shape[2:] != self.config.preprocess.patch_size:
+            if MONAI_AVAILABLE and images.shape[2:] != tuple(self.config.preprocess.patch_size):
                 outputs = sliding_window_inference(
                     images,
                     roi_size=self.config.preprocess.patch_size,
                     sw_batch_size=self.config.train.sw_batch_size,
-                    predictor=self.model,
-                    overlap=self.config.train.sw_overlap
+                    predictor=model_fn,
+                    overlap=self.config.train.sw_overlap,
+                    mode='gaussian',  # Use gaussian weighting for smoother predictions
+                    device=self.device,
                 )
             else:
                 outputs = self.model(images)
@@ -527,6 +532,9 @@ class Trainer:
         self.model.eval()
         self.dice_metric.reset()
 
+        # Get the actual model (unwrap DataParallel if needed)
+        model_fn = self.model.module if isinstance(self.model, nn.DataParallel) else self.model
+
         for batch in tqdm(self.test_loader, desc='Testing'):
             if batch is None:
                 continue
@@ -540,8 +548,10 @@ class Trainer:
                     images,
                     roi_size=self.config.preprocess.patch_size,
                     sw_batch_size=self.config.train.sw_batch_size,
-                    predictor=self.model,
-                    overlap=self.config.train.sw_overlap
+                    predictor=model_fn,
+                    overlap=self.config.train.sw_overlap,
+                    mode='gaussian',
+                    device=self.device,
                 )
             else:
                 outputs = self.model(images)
