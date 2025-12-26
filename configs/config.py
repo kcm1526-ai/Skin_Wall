@@ -178,11 +178,11 @@ class TrainConfig:
     early_stopping_min_delta: float = 0.001
 
     # Validation
-    val_every_n_epochs: int = 1
+    val_every_n_epochs: int = 5  # Validate every 5 epochs instead of every epoch
 
     # Sliding window inference
-    sw_batch_size: int = 4
-    sw_overlap: float = 0.5
+    sw_batch_size: int = 8   # Process more patches in parallel
+    sw_overlap: float = 0.25  # Reduce overlap (0.5 -> 0.25 = 4x fewer patches)
 
     # Resume training
     resume_checkpoint: Optional[str] = None
