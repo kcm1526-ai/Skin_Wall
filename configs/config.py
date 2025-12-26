@@ -139,7 +139,7 @@ class TrainConfig:
 
     # Optimizer
     optimizer: str = "adamw"  # "adam", "adamw", "sgd"
-    learning_rate: float = 2e-4  # Increased from 1e-4
+    learning_rate: float = 2e-3  # Increased to 0.002
     weight_decay: float = 1e-5
 
     # Learning rate scheduler
