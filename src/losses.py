@@ -497,19 +497,23 @@ def get_loss_function(config) -> nn.Module:
     dice_weight = 0.0
     ce_weight = 0.0
     focal_weight = 0.0
+    gdc_weight = 0.0
 
-    if 'dice' in loss_type:
+    if 'dice' in loss_type and 'gdc' not in loss_type:
         dice_weight = config.train.dice_weight
     if 'ce' in loss_type:
         ce_weight = config.train.ce_weight
     if 'focal' in loss_type:
         focal_weight = config.train.focal_weight
+    if 'gdc' in loss_type:
+        gdc_weight = getattr(config.train, 'gdc_weight', 1.0)
 
     # Create combined loss
     base_loss = CombinedLoss(
         dice_weight=dice_weight,
         ce_weight=ce_weight,
         focal_weight=focal_weight,
+        gdc_weight=gdc_weight,
         focal_gamma=config.train.focal_gamma,
         class_weights=config.train.class_weights,
         include_background=True

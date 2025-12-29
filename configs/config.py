@@ -147,12 +147,15 @@ class TrainConfig:
     warmup_epochs: int = 5  # Reduced from 10
     min_lr: float = 1e-6
 
-    # Loss function - simplified to Dice + CE only
-    loss_type: str = "dice_ce"  # Removed focal - can cause instability
+    # Loss function - Generalized Dice for severe class imbalance
+    # GDC automatically weights classes by inverse frequency - ideal for sparse labels
+    # CE with equal weights causes model collapse to predicting all background
+    loss_type: str = "gdc"  # "dice", "gdc" (generalized dice), or "dice_ce"
     dice_weight: float = 1.0
-    ce_weight: float = 0.5  # Reduced CE weight, let Dice dominate
+    ce_weight: float = 0.0  # Disabled - CE causes collapse with severe imbalance
     focal_weight: float = 0.0  # Disabled
     focal_gamma: float = 2.0
+    gdc_weight: float = 1.0  # Generalized Dice Loss - handles class imbalance automatically
 
     # Class weights for imbalanced data (pre-computed to avoid slow startup)
     # [background, skin, abdominal_wall] - higher weight = rarer class
