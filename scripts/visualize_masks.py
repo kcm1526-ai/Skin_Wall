@@ -41,7 +41,7 @@ def load_dicom_series(dicom_dir: str) -> np.ndarray:
             if f == 'Mask':
                 continue
             try:
-                # Try to read as DICOM
+                # Try to read as DICOM with force=True for files without extension
                 dcm = pydicom.dcmread(file_path, stop_before_pixels=True, force=True)
                 if hasattr(dcm, 'SOPClassUID') or hasattr(dcm, 'Modality'):
                     dicom_files.append(file_path)
@@ -53,44 +53,44 @@ def load_dicom_series(dicom_dir: str) -> np.ndarray:
 
     print(f"Found {len(dicom_files)} DICOM files")
 
-    # Use SimpleITK for robust loading
-    reader = sitk.ImageSeriesReader()
-    series_ids = reader.GetGDCMSeriesIDs(dicom_dir)
-
-    if series_ids:
-        series_file_names = reader.GetGDCMSeriesFileNames(dicom_dir, series_ids[0])
-        reader.SetFileNames(series_file_names)
-        image = reader.Execute()
-        volume = sitk.GetArrayFromImage(image)  # Shape: (Z, Y, X)
-    else:
-        # Fallback: load with pydicom
-        slices = []
-        for f in dicom_files:
-            try:
-                dcm = pydicom.dcmread(f, force=True)
-                if hasattr(dcm, 'pixel_array'):
-                    slices.append(dcm)
-            except:
-                continue
-
-        # Sort by slice location or instance number
+    # Load with pydicom (works with files without .dcm extension)
+    slices = []
+    for f in dicom_files:
         try:
-            slices.sort(key=lambda x: float(x.SliceLocation))
-        except:
-            try:
-                slices.sort(key=lambda x: int(x.InstanceNumber))
-            except:
-                pass
+            dcm = pydicom.dcmread(f, force=True)
+            if hasattr(dcm, 'pixel_array'):
+                slices.append(dcm)
+        except Exception as e:
+            print(f"Warning: Could not read {f}: {e}")
+            continue
 
-        volume = np.stack([s.pixel_array for s in slices], axis=0)
+    if not slices:
+        raise ValueError("Could not load any DICOM slices with pixel data")
 
-        # Apply rescale slope/intercept
+    print(f"Loaded {len(slices)} slices with pixel data")
+
+    # Sort by slice location or instance number
+    try:
+        slices.sort(key=lambda x: float(x.SliceLocation))
+        print("Sorted by SliceLocation")
+    except:
         try:
-            slope = float(slices[0].RescaleSlope)
-            intercept = float(slices[0].RescaleIntercept)
-            volume = volume * slope + intercept
+            slices.sort(key=lambda x: int(x.InstanceNumber))
+            print("Sorted by InstanceNumber")
         except:
-            pass
+            print("Warning: Could not sort slices")
+
+    # Stack slices into volume
+    volume = np.stack([s.pixel_array for s in slices], axis=0)
+
+    # Apply rescale slope/intercept for HU values
+    try:
+        slope = float(slices[0].RescaleSlope)
+        intercept = float(slices[0].RescaleIntercept)
+        volume = volume * slope + intercept
+        print(f"Applied rescale: slope={slope}, intercept={intercept}")
+    except:
+        pass
 
     return volume.astype(np.float32)
 
