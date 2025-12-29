@@ -323,6 +323,7 @@ class Trainer:
                 label_unique, label_counts = torch.unique(labels, return_counts=True)
                 self.logger.info(f"[DEBUG TRAIN] Label distribution: {dict(zip(label_unique.cpu().tolist(), label_counts.cpu().tolist()))}")
                 self.logger.info(f"[DEBUG TRAIN] Image shape: {images.shape}, Label shape: {labels.shape}")
+                self.logger.info(f"[DEBUG TRAIN] Image min/max/mean: {images.min():.4f}/{images.max():.4f}/{images.mean():.4f}")
 
             # Forward pass with mixed precision
             if self.config.train.use_amp:
@@ -421,21 +422,22 @@ class Trainer:
 
             # For sliding window inference, create a wrapper that handles DataParallel
             # Add debugging to understand what's happening
+            sw_debug_logged = [False]  # Use list to allow modification in closure
             def model_predictor(x):
                 # Ensure input is on correct device
                 x = x.to(self.device)
                 out = self.model(x)
                 if isinstance(out, tuple):
                     out = out[0]
-                # Debug: check if model is predicting anything other than zeros
-                if not first_batch_logged:
-                    with torch.no_grad():
-                        pred_check = out.argmax(dim=1)
-                        unique_vals = torch.unique(pred_check)
-                        if len(unique_vals) == 1 and unique_vals[0] == 0:
-                            self.logger.info(f"[DEBUG SW] Model predicting all zeros in patch! Input shape: {x.shape}, Output shape: {out.shape}")
-                            self.logger.info(f"[DEBUG SW] Output min/max: {out.min():.4f}/{out.max():.4f}")
-                            self.logger.info(f"[DEBUG SW] Output channel 0 mean: {out[:,0].mean():.4f}, channel 1 mean: {out[:,1].mean():.4f}")
+                # Debug: check input and output statistics (only once)
+                if not sw_debug_logged[0]:
+                    sw_debug_logged[0] = True
+                    self.logger.info(f"[DEBUG SW] Input min/max/mean: {x.min():.4f}/{x.max():.4f}/{x.mean():.4f}")
+                    self.logger.info(f"[DEBUG SW] Output shape: {out.shape}")
+                    self.logger.info(f"[DEBUG SW] Output channel 0 mean: {out[:,0].mean():.4f}, channel 1 mean: {out[:,1].mean():.4f}")
+                    pred_check = out.argmax(dim=1)
+                    unique_vals = torch.unique(pred_check)
+                    self.logger.info(f"[DEBUG SW] Pred unique values: {unique_vals.tolist()}")
                 return out
 
             # Sliding window inference for full volumes
