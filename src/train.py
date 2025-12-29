@@ -308,6 +308,7 @@ class Trainer:
 
         pbar = tqdm(self.train_loader, desc=f'Epoch {epoch}', leave=False)
         accumulation_counter = 0
+        first_batch_logged = False
 
         for batch_idx, batch in enumerate(pbar):
             if batch is None:
@@ -315,6 +316,13 @@ class Trainer:
 
             images = batch['image'].to(self.device)
             labels = batch['label'].to(self.device)
+
+            # Debug: show label distribution for first batch of first epoch
+            if not first_batch_logged and epoch == 0:
+                first_batch_logged = True
+                label_unique, label_counts = torch.unique(labels, return_counts=True)
+                self.logger.info(f"[DEBUG TRAIN] Label distribution: {dict(zip(label_unique.cpu().tolist(), label_counts.cpu().tolist()))}")
+                self.logger.info(f"[DEBUG TRAIN] Image shape: {images.shape}, Label shape: {labels.shape}")
 
             # Forward pass with mixed precision
             if self.config.train.use_amp:
@@ -330,6 +338,17 @@ class Trainer:
                 loss, loss_dict = self.loss_fn(outputs, labels)
                 loss = loss / self.config.train.accumulation_steps
                 loss.backward()
+
+            # Debug: show prediction distribution for first batch of first epoch
+            if first_batch_logged and batch_idx == 0 and epoch == 0:
+                with torch.no_grad():
+                    if isinstance(outputs, tuple):
+                        out = outputs[0]
+                    else:
+                        out = outputs
+                    pred = out.argmax(dim=1)
+                    pred_unique, pred_counts = torch.unique(pred, return_counts=True)
+                    self.logger.info(f"[DEBUG TRAIN] Pred distribution: {dict(zip(pred_unique.cpu().tolist(), pred_counts.cpu().tolist()))}")
 
             accumulation_counter += 1
 
