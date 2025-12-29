@@ -415,8 +415,14 @@ class Trainer:
             images = batch['image'].to(self.device)
             labels = batch['label'].to(self.device)
 
-            # Get the actual model (unwrap DataParallel if needed)
-            model_fn = self.model.module if isinstance(self.model, nn.DataParallel) else self.model
+            # For sliding window inference, create a wrapper that handles DataParallel
+            def model_predictor(x):
+                # Ensure input is on correct device
+                x = x.to(self.device)
+                out = self.model(x)
+                if isinstance(out, tuple):
+                    return out[0]
+                return out
 
             # Sliding window inference for full volumes
             if MONAI_AVAILABLE and images.shape[2:] != tuple(self.config.preprocess.patch_size):
@@ -424,10 +430,9 @@ class Trainer:
                     images,
                     roi_size=self.config.preprocess.patch_size,
                     sw_batch_size=self.config.train.sw_batch_size,
-                    predictor=model_fn,
+                    predictor=model_predictor,
                     overlap=self.config.train.sw_overlap,
-                    mode='gaussian',  # Use gaussian weighting for smoother predictions
-                    device=self.device,
+                    mode='gaussian',
                 )
             else:
                 outputs = self.model(images)
@@ -569,8 +574,13 @@ class Trainer:
         self.model.eval()
         self.dice_metric.reset()
 
-        # Get the actual model (unwrap DataParallel if needed)
-        model_fn = self.model.module if isinstance(self.model, nn.DataParallel) else self.model
+        # Create wrapper for sliding window inference that handles DataParallel
+        def model_predictor(x):
+            x = x.to(self.device)
+            out = self.model(x)
+            if isinstance(out, tuple):
+                return out[0]
+            return out
 
         for batch in tqdm(self.test_loader, desc='Testing'):
             if batch is None:
@@ -585,10 +595,9 @@ class Trainer:
                     images,
                     roi_size=self.config.preprocess.patch_size,
                     sw_batch_size=self.config.train.sw_batch_size,
-                    predictor=model_fn,
+                    predictor=model_predictor,
                     overlap=self.config.train.sw_overlap,
                     mode='gaussian',
-                    device=self.device,
                 )
             else:
                 outputs = self.model(images)
