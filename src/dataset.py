@@ -568,12 +568,13 @@ def get_transforms(config, mode: str = 'train'):
             EnsureTyped(keys=['image', 'label']),
 
             # Random cropping with positive/negative sampling
+            # Use balanced pos/neg to ensure model sees both foreground and background
             RandCropByPosNegLabeld(
                 keys=['image', 'label'],
                 label_key='label',
                 spatial_size=patch_size,
-                pos=2,  # 2 positive samples
-                neg=1,  # 1 negative sample
+                pos=1,  # 1 positive sample (foreground)
+                neg=1,  # 1 negative sample (background) - balanced!
                 num_samples=4,  # 4 patches per volume
                 image_key='image',
                 image_threshold=0,
