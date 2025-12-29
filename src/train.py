@@ -426,6 +426,13 @@ class Trainer:
             pred = outputs.argmax(dim=1)
             self.dice_metric.update(pred, labels.squeeze(1))
 
+            # Debug: show prediction distribution for first batch
+            if pbar.n == 0:
+                pred_unique, pred_counts = torch.unique(pred, return_counts=True)
+                label_unique, label_counts = torch.unique(labels, return_counts=True)
+                self.logger.info(f"Pred distribution: {dict(zip(pred_unique.cpu().tolist(), pred_counts.cpu().tolist()))}")
+                self.logger.info(f"Label distribution: {dict(zip(label_unique.cpu().tolist(), label_counts.cpu().tolist()))}")
+
         # Compute metrics
         val_loss /= num_batches
         dice_results = self.dice_metric.compute()
@@ -455,14 +462,23 @@ class Trainer:
             if (epoch + 1) % self.config.train.val_every_n_epochs == 0:
                 val_metrics = self.validate(epoch)
 
-                # Log metrics with per-class dice
-                skin_dice = val_metrics.get('dice_class_1', 0)
-                wall_dice = val_metrics.get('dice_class_2', 0)
+                # Log metrics with per-class dice (mode-aware)
+                mean_dice = val_metrics.get('mean_dice', 0)
+                if self.training_mode == 'skin':
+                    target_dice = val_metrics.get('dice_class_1', 0)
+                    dice_str = f"[Skin: {target_dice:.4f}]"
+                elif self.training_mode == 'wall':
+                    target_dice = val_metrics.get('dice_class_1', 0)
+                    dice_str = f"[Wall: {target_dice:.4f}]"
+                else:  # both
+                    skin_dice = val_metrics.get('dice_class_1', 0)
+                    wall_dice = val_metrics.get('dice_class_2', 0)
+                    dice_str = f"[Skin: {skin_dice:.4f}, Wall: {wall_dice:.4f}]"
+
                 self.logger.info(
                     f"Epoch {epoch} - Train Loss: {train_metrics['loss']:.4f}, "
                     f"Val Loss: {val_metrics['loss']:.4f}, "
-                    f"Mean Dice: {val_metrics.get('mean_dice', 0):.4f} "
-                    f"[Skin: {skin_dice:.4f}, Wall: {wall_dice:.4f}]"
+                    f"Mean Dice: {mean_dice:.4f} {dice_str}"
                 )
 
                 # Check for best model
