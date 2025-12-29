@@ -387,6 +387,7 @@ class Trainer:
         num_batches = len(self.val_loader)
 
         pbar = tqdm(self.val_loader, desc='Validation', leave=False)
+        first_batch_logged = False
 
         for batch in pbar:
             if batch is None:
@@ -427,11 +428,12 @@ class Trainer:
             self.dice_metric.update(pred, labels.squeeze(1))
 
             # Debug: show prediction distribution for first batch
-            if pbar.n == 0:
+            if not first_batch_logged:
+                first_batch_logged = True
                 pred_unique, pred_counts = torch.unique(pred, return_counts=True)
                 label_unique, label_counts = torch.unique(labels, return_counts=True)
-                self.logger.info(f"Pred distribution: {dict(zip(pred_unique.cpu().tolist(), pred_counts.cpu().tolist()))}")
-                self.logger.info(f"Label distribution: {dict(zip(label_unique.cpu().tolist(), label_counts.cpu().tolist()))}")
+                self.logger.info(f"[DEBUG] Pred distribution: {dict(zip(pred_unique.cpu().tolist(), pred_counts.cpu().tolist()))}")
+                self.logger.info(f"[DEBUG] Label distribution: {dict(zip(label_unique.cpu().tolist(), label_counts.cpu().tolist()))}")
 
         # Compute metrics
         val_loss /= num_batches
