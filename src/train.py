@@ -409,6 +409,8 @@ class Trainer:
 
         pbar = tqdm(self.val_loader, desc='Validation', leave=False)
         first_batch_logged = False
+        running_dice = 0.0
+        num_processed = 0
 
         for batch in pbar:
             if batch is None:
@@ -418,12 +420,22 @@ class Trainer:
             labels = batch['label'].to(self.device)
 
             # For sliding window inference, create a wrapper that handles DataParallel
+            # Add debugging to understand what's happening
             def model_predictor(x):
                 # Ensure input is on correct device
                 x = x.to(self.device)
                 out = self.model(x)
                 if isinstance(out, tuple):
-                    return out[0]
+                    out = out[0]
+                # Debug: check if model is predicting anything other than zeros
+                if not first_batch_logged:
+                    with torch.no_grad():
+                        pred_check = out.argmax(dim=1)
+                        unique_vals = torch.unique(pred_check)
+                        if len(unique_vals) == 1 and unique_vals[0] == 0:
+                            self.logger.info(f"[DEBUG SW] Model predicting all zeros in patch! Input shape: {x.shape}, Output shape: {out.shape}")
+                            self.logger.info(f"[DEBUG SW] Output min/max: {out.min():.4f}/{out.max():.4f}")
+                            self.logger.info(f"[DEBUG SW] Output channel 0 mean: {out[:,0].mean():.4f}, channel 1 mean: {out[:,1].mean():.4f}")
                 return out
 
             # Sliding window inference for full volumes
@@ -452,6 +464,23 @@ class Trainer:
             # Update metrics
             pred = outputs.argmax(dim=1)
             self.dice_metric.update(pred, labels.squeeze(1))
+
+            # Compute per-batch dice for progress display
+            pred_np = pred.cpu().numpy()
+            label_np = labels.squeeze(1).cpu().numpy()
+            # Compute dice for class 1 (foreground)
+            pred_fg = (pred_np == 1).astype(float)
+            label_fg = (label_np == 1).astype(float)
+            intersection = (pred_fg * label_fg).sum()
+            union = pred_fg.sum() + label_fg.sum()
+            batch_dice = 2.0 * intersection / (union + 1e-8)
+
+            running_dice += batch_dice
+            num_processed += 1
+            avg_dice = running_dice / num_processed
+
+            # Update progress bar with dice
+            pbar.set_postfix({'dice': f'{avg_dice:.4f}', 'batch_dice': f'{batch_dice:.4f}'})
 
             # Debug: show prediction distribution for first batch
             if not first_batch_logged:
