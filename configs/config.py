@@ -52,7 +52,7 @@ class PreprocessConfig:
 
     # Intensity normalization
     clip_values: Tuple[float, float] = (-1000, 1000)  # HU values for CT
-    normalize_method: str = "zscore"  # "zscore" or "minmax"
+    normalize_method: str = "minmax"  # "zscore" or "minmax" - minmax is more stable for train/val consistency
 
     # Window/Level for CT (optional)
     use_windowing: bool = True
