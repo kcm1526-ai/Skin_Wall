@@ -399,7 +399,9 @@ class Trainer:
     @torch.no_grad()
     def validate(self, epoch: int) -> Dict[str, float]:
         """Validate model"""
-        self.model.eval()
+        # Keep model in train mode to use batch statistics instead of running statistics
+        # This is a workaround for BatchNorm issues with DataParallel
+        self.model.train()
         self.dice_metric.reset()
 
         val_loss = 0.0
@@ -571,7 +573,9 @@ class Trainer:
     @torch.no_grad()
     def _test(self) -> Dict[str, float]:
         """Run test evaluation"""
-        self.model.eval()
+        # Keep model in train mode to use batch statistics instead of running statistics
+        # This is a workaround for BatchNorm issues with DataParallel
+        self.model.train()
         self.dice_metric.reset()
 
         # Create wrapper for sliding window inference that handles DataParallel
