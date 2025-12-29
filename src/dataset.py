@@ -437,20 +437,30 @@ class SkinWallDataset(Dataset):
         }
 
     def _align_mask_to_image(self, mask: np.ndarray, target_shape: Tuple) -> np.ndarray:
-        """Align mask to image shape through transpose or resampling"""
+        """Align mask to image shape through transpose and flip.
+
+        Based on diagnostic analysis, the correct transformation for NIfTI masks
+        to align with DICOM images is:
+        - Transpose: (2, 1, 0)
+        - Flip: axis 0
+        """
         if mask.shape == target_shape:
             return mask
 
-        # Check if it's just a transpose issue (same dimensions, different order)
-        # This is common: Image (D, H, W) vs Mask (H, W, D)
+        # Check if it's a transpose/flip issue (same dimensions, different order)
         mask_dims = sorted(mask.shape)
         target_dims = sorted(target_shape)
 
         if mask_dims == target_dims:
-            # Find the correct transpose order
-            # Image: (D, H, W), Mask: (H, W, D) -> need to transpose to (D, H, W)
-            # Common case: mask is (512, 512, D) and image is (D, 512, 512)
-            for axes in [(2, 0, 1), (1, 2, 0), (0, 2, 1), (2, 1, 0), (1, 0, 2)]:
+            # Apply the correct transformation: transpose (2,1,0) then flip axis 0
+            transposed = np.transpose(mask, (2, 1, 0))
+            if transposed.shape == target_shape:
+                # Flip along axis 0 to correct orientation
+                aligned = np.flip(transposed, axis=0)
+                return np.ascontiguousarray(aligned)
+
+            # Fallback: try other transpose orders if the above doesn't work
+            for axes in [(2, 0, 1), (1, 2, 0), (0, 2, 1), (1, 0, 2)]:
                 transposed = np.transpose(mask, axes)
                 if transposed.shape == target_shape:
                     return transposed

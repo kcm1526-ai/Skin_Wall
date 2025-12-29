@@ -107,7 +107,12 @@ def load_nifti_mask(mask_path: str) -> np.ndarray:
 
 
 def align_mask_to_image(mask: np.ndarray, target_shape: tuple) -> np.ndarray:
-    """Align mask to image shape through transpose"""
+    """Align mask to image shape through transpose and flip.
+
+    Based on diagnostic analysis, the correct transformation is:
+    - Transpose: (2, 1, 0)
+    - Flip: axis 0 (True, False, False)
+    """
     if mask is None:
         return None
 
@@ -119,11 +124,19 @@ def align_mask_to_image(mask: np.ndarray, target_shape: tuple) -> np.ndarray:
     target_dims = sorted(target_shape)
 
     if mask_dims == target_dims:
-        # Try different transpose orders
-        for axes in [(2, 0, 1), (1, 2, 0), (0, 2, 1), (2, 1, 0), (1, 0, 2)]:
+        # Apply the correct transformation: transpose (2,1,0) then flip axis 0
+        transposed = np.transpose(mask, (2, 1, 0))
+        if transposed.shape == target_shape:
+            # Flip along axis 0
+            aligned = np.flip(transposed, axis=0)
+            print(f"Aligned mask: transpose (2,1,0) + flip axis 0: {mask.shape} -> {aligned.shape}")
+            return np.ascontiguousarray(aligned)
+
+        # Fallback: try other transpose orders if the above doesn't work
+        for axes in [(2, 0, 1), (1, 2, 0), (0, 2, 1), (1, 0, 2)]:
             transposed = np.transpose(mask, axes)
             if transposed.shape == target_shape:
-                print(f"Transposed mask from {mask.shape} to {transposed.shape}")
+                print(f"Transposed mask from {mask.shape} to {transposed.shape} using {axes}")
                 return transposed
 
     print(f"Warning: Could not align mask {mask.shape} to image {target_shape}")
