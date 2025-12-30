@@ -139,29 +139,27 @@ class TrainConfig:
 
     # Optimizer
     optimizer: str = "adamw"  # "adam", "adamw", "sgd"
-    learning_rate: float = 2e-3  # Increased to 0.002
+    learning_rate: float = 1e-4  # Reduced from 2e-3 to prevent catastrophic forgetting
     weight_decay: float = 1e-5
 
     # Learning rate scheduler
-    scheduler: str = "cosine_warmup"  # "cosine", "cosine_warmup", "step", "reduce_on_plateau"
-    warmup_epochs: int = 5  # Reduced from 10
+    scheduler: str = "reduce_on_plateau"  # Changed to catch performance degradation
+    warmup_epochs: int = 10  # Increased warmup
     min_lr: float = 1e-6
 
-    # Loss function - Generalized Dice for severe class imbalance
-    # GDC automatically weights classes by inverse frequency - ideal for sparse labels
-    # CE with equal weights causes model collapse to predicting all background
-    loss_type: str = "gdc"  # "dice", "gdc" (generalized dice), or "dice_ce"
+    # Loss function - GDC + small CE for stability
+    # Pure GDC can be unstable; small CE with high foreground weight stabilizes training
+    loss_type: str = "gdc_ce"  # Combined: GDC for imbalance + CE for stability
     dice_weight: float = 1.0
-    ce_weight: float = 0.0  # Disabled - CE causes collapse with severe imbalance
+    ce_weight: float = 0.1  # Small CE weight for stability
     focal_weight: float = 0.0  # Disabled
     focal_gamma: float = 2.0
-    gdc_weight: float = 1.0  # Generalized Dice Loss - handles class imbalance automatically
+    gdc_weight: float = 1.0  # Generalized Dice Loss
 
-    # Class weights for imbalanced data (pre-computed to avoid slow startup)
-    # [background, skin, abdominal_wall] - higher weight = rarer class
-    # Setting to balanced weights - let Dice loss handle class imbalance instead
+    # Class weights for imbalanced data - HIGH weight for foreground
+    # This prevents the CE component from pushing toward all-background
     use_class_weights: bool = True
-    class_weights: Optional[List[float]] = field(default_factory=lambda: [1.0, 1.0, 1.0])
+    class_weights: Optional[List[float]] = field(default_factory=lambda: [1.0, 50.0])  # [bg, fg] - 50x weight for foreground
 
     # Gradient accumulation
     accumulation_steps: int = 4
