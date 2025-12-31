@@ -5,6 +5,7 @@ Run this once before training to convert all DICOM series to .npy files.
 
 Usage:
     python scripts/precache_data.py
+    python scripts/precache_data.py --force  # Re-cache all with correct alignment
 """
 
 import os
@@ -13,12 +14,38 @@ from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
 import numpy as np
+from scipy.ndimage import binary_fill_holes
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from configs.config import get_config
 from src.dataset import DICOMLoader, MaskLoader, find_data_paths
+
+
+def fill_contour_mask(mask: np.ndarray) -> np.ndarray:
+    """
+    Fill the interior of a contour/outline mask.
+
+    The wall mask is just an outline/boundary. This function fills
+    everything inside the closed contour to create a solid mask.
+
+    Args:
+        mask: 3D binary mask where 1 = contour outline
+
+    Returns:
+        3D binary mask where 1 = filled interior (including contour)
+    """
+    filled = np.zeros_like(mask)
+
+    # Process slice by slice (axial slices) since contours are drawn per-slice
+    for z in range(mask.shape[0]):
+        slice_2d = mask[z, :, :]
+        if slice_2d.max() > 0:  # Only process slices with contour
+            # binary_fill_holes fills the interior of closed contours
+            filled[z, :, :] = binary_fill_holes(slice_2d).astype(np.uint8)
+
+    return filled
 
 
 def align_mask_to_image(mask: np.ndarray, target_shape: tuple) -> np.ndarray:
@@ -81,6 +108,10 @@ def process_sample(sample: dict, cache_dir: str, force_recache: bool = False) ->
         # NIfTI masks need transpose(2,1,0) + flip(axis=0) to align with DICOM
         skin_mask = align_mask_to_image(skin_mask, image.shape)
         abdominal_mask = align_mask_to_image(abdominal_mask, image.shape)
+
+        # IMPORTANT: Fill the wall contour mask
+        # The wall mask is just an outline/boundary - we need the filled interior
+        abdominal_mask = fill_contour_mask(abdominal_mask)
 
         # Save as uncompressed numpy dict (much faster to load than .npz)
         cache_data = {
