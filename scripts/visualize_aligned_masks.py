@@ -35,21 +35,19 @@ def align_mask_to_image(mask: np.ndarray, target_shape: tuple) -> np.ndarray:
     NIfTI: (X, Y, Z) orientation
     DICOM: (Z, Y, X) orientation
 
-    Transformation: transpose(2, 1, 0) + flip(axis=0)
+    Transformation: transpose(2, 1, 0) only (no flip needed)
     """
-    # Always apply transpose (2, 1, 0) first
+    # Apply transpose (2, 1, 0) to convert (X, Y, Z) -> (Z, Y, X)
     transposed = np.transpose(mask, (2, 1, 0))
 
     if transposed.shape == target_shape:
-        aligned = np.flip(transposed, axis=0)
-        return np.ascontiguousarray(aligned)
+        return np.ascontiguousarray(transposed)
 
     # Try other permutations if needed
     for axes in [(2, 0, 1), (1, 2, 0), (0, 2, 1), (1, 0, 2), (0, 1, 2)]:
         transposed = np.transpose(mask, axes)
         if transposed.shape == target_shape:
-            aligned = np.flip(transposed, axis=0)
-            return np.ascontiguousarray(aligned)
+            return np.ascontiguousarray(transposed)
 
     # Fallback: resample
     from scipy.ndimage import zoom
