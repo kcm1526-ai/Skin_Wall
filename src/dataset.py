@@ -349,30 +349,101 @@ class SkinWallDataset(Dataset):
     def _resample_volume(self, volume: np.ndarray, current_spacing: Tuple,
                          target_spacing: Tuple, order: int = 1) -> np.ndarray:
         """
-        Resample volume to target voxel spacing.
+        Resample volume to target voxel spacing using SimpleITK.
 
         Args:
             volume: 3D numpy array (Z, Y, X)
             current_spacing: Current voxel spacing (X, Y, Z) in mm
             target_spacing: Target voxel spacing (X, Y, Z) in mm
-            order: Interpolation order (0=nearest, 1=linear, 3=cubic)
+            order: Interpolation (0=nearest for masks, 1=linear, 3=bspline for images)
 
         Returns:
             Resampled volume
         """
-        # Calculate zoom factors (spacing is X,Y,Z but volume is Z,Y,X)
-        # So we need to reverse the spacing order
+        # Check if resampling is needed
         current_spacing_zyx = (current_spacing[2], current_spacing[1], current_spacing[0])
         target_spacing_zyx = (target_spacing[2], target_spacing[1], target_spacing[0])
-
         zoom_factors = [c / t for c, t in zip(current_spacing_zyx, target_spacing_zyx)]
 
-        # Only resample if zoom factors are significantly different from 1
         if all(0.95 < z < 1.05 for z in zoom_factors):
             return volume
 
-        resampled = zoom(volume, zoom_factors, order=order)
+        # Convert numpy array to SimpleITK image
+        img_sitk = sitk.GetImageFromArray(volume)
+        # Note: SimpleITK spacing is (X, Y, Z), but array is (Z, Y, X)
+        # So we need to reverse the spacing for SetSpacing
+        img_sitk.SetSpacing((current_spacing[0], current_spacing[1], current_spacing[2]))
+
+        # Select interpolation method
+        if order == 0:
+            interpolation = sitk.sitkNearestNeighbor
+        elif order == 1:
+            interpolation = sitk.sitkLinear
+        else:
+            interpolation = sitk.sitkBSpline
+
+        # Resample using SimpleITK
+        resampled_sitk = self._resample_sitk_fixed_spacing(img_sitk, interpolation, target_spacing)
+
+        # Convert back to numpy array
+        resampled = sitk.GetArrayFromImage(resampled_sitk)
         return resampled
+
+    def _resample_sitk_fixed_spacing(self, img_sitk, interpolation, new_spacing):
+        """
+        Resample SimpleITK image to fixed spacing.
+
+        Based on user-provided resampling code that properly handles
+        coordinate systems and centering.
+        """
+        dimension = img_sitk.GetDimension()
+
+        # Calculate new size based on new spacing
+        original_size = np.array(img_sitk.GetSize())
+        original_spacing = np.array(img_sitk.GetSpacing())
+        new_spacing = np.array(new_spacing)
+
+        new_size = np.round(original_size * original_spacing / new_spacing).astype(int)
+        new_size = [int(s) for s in new_size]
+
+        reference_direction = img_sitk.GetDirection()
+        reference_origin = img_sitk.GetOrigin()
+
+        # Create reference image
+        reference_image = sitk.Image(new_size, img_sitk.GetPixelIDValue())
+        reference_image.SetOrigin(reference_origin)
+        reference_image.SetSpacing([float(s) for s in new_spacing])
+        reference_image.SetDirection(reference_direction)
+
+        # Calculate centers
+        reference_center = np.array(
+            reference_image.TransformContinuousIndexToPhysicalPoint(
+                np.array(reference_image.GetSize()) / 2.0
+            )
+        )
+
+        # Create transform
+        transform = sitk.AffineTransform(dimension)
+        transform.SetMatrix(img_sitk.GetDirection())
+        transform.SetTranslation(np.array(img_sitk.GetOrigin()) - np.array(reference_origin))
+
+        # Centering transform
+        centering_transform = sitk.TranslationTransform(dimension)
+        img_center = np.array(
+            img_sitk.TransformContinuousIndexToPhysicalPoint(
+                np.array(img_sitk.GetSize()) / 2.0
+            )
+        )
+        centering_transform.SetOffset(
+            np.array(transform.GetInverse().TransformPoint(img_center) - reference_center)
+        )
+
+        # Composite transform
+        centered_transform = sitk.CompositeTransform([centering_transform, transform])
+
+        # Resample
+        new_img = sitk.Resample(img_sitk, reference_image, centered_transform, interpolation, 0.0)
+        return new_img
 
     def _align_mask_to_image_always(self, mask: np.ndarray, target_shape: Tuple) -> np.ndarray:
         """
