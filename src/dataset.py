@@ -384,21 +384,17 @@ class SkinWallDataset(Dataset):
         NIfTI: RAS+ (Right-Anterior-Superior), stored as (X, Y, Z)
         DICOM/SimpleITK: LPS (Left-Posterior-Superior), stored as (Z, Y, X)
 
-        Transformation: transpose(2, 1, 0) + flip(axis=0) + flip(axis=1)
+        Transformation: transpose(2, 1, 0) + flip(axis=0)
         - transpose: (X, Y, Z) -> (Z, Y, X)
-        - flip axis=0: Superior->Inferior (Z-axis slice order)
-        - flip axis=1: Anterior->Posterior (Y-axis vertical in axial view)
+        - flip axis=0: Reverse Z-axis slice order (mask[0] -> mask[-1])
         """
         # Always apply transpose (2, 1, 0) first
         transposed = np.transpose(mask, (2, 1, 0))
 
         # Check if shape matches after transpose
         if transposed.shape == target_shape:
-            # Apply flips for correct alignment
-            # axis=0: flip Z (slice order)
-            # axis=1: flip Y (vertical in axial view - fixes mask at bottom issue)
+            # Flip Z-axis to reverse slice order
             aligned = np.flip(transposed, axis=0)
-            aligned = np.flip(aligned, axis=1)
             return np.ascontiguousarray(aligned)
 
         # If shapes don't match, try other permutations
@@ -406,7 +402,6 @@ class SkinWallDataset(Dataset):
             transposed = np.transpose(mask, axes)
             if transposed.shape == target_shape:
                 aligned = np.flip(transposed, axis=0)
-                aligned = np.flip(aligned, axis=1)
                 return np.ascontiguousarray(aligned)
 
         # Fallback: resample to match shape
