@@ -378,31 +378,26 @@ class SkinWallDataset(Dataset):
         """
         Align NIfTI mask to DICOM image coordinate system.
 
-        ALWAYS applies transformation (transpose + flip) since NIfTI and DICOM
+        ALWAYS applies transformation (transpose only) since NIfTI and DICOM
         use different coordinate systems.
 
-        NIfTI: RAS+ (Right-Anterior-Superior), stored as (X, Y, Z)
-        DICOM/SimpleITK: LPS (Left-Posterior-Superior), stored as (Z, Y, X)
+        NIfTI: (X, Y, Z) orientation
+        DICOM: (Z, Y, X) orientation
 
-        Transformation: transpose(2, 1, 0) + flip(axis=0)
-        - transpose: (X, Y, Z) -> (Z, Y, X)
-        - flip axis=0: Reverse Z-axis slice order (mask[0] -> mask[-1])
+        Transformation: transpose(2, 1, 0) only (no flip needed)
         """
-        # Always apply transpose (2, 1, 0) first
+        # Apply transpose (2, 1, 0) to convert (X, Y, Z) -> (Z, Y, X)
         transposed = np.transpose(mask, (2, 1, 0))
 
         # Check if shape matches after transpose
         if transposed.shape == target_shape:
-            # Flip Z-axis to reverse slice order
-            aligned = np.flip(transposed, axis=0)
-            return np.ascontiguousarray(aligned)
+            return np.ascontiguousarray(transposed)
 
         # If shapes don't match, try other permutations
         for axes in [(2, 0, 1), (1, 2, 0), (0, 2, 1), (1, 0, 2), (0, 1, 2)]:
             transposed = np.transpose(mask, axes)
             if transposed.shape == target_shape:
-                aligned = np.flip(transposed, axis=0)
-                return np.ascontiguousarray(aligned)
+                return np.ascontiguousarray(transposed)
 
         # Fallback: resample to match shape
         logger.warning(f"Mask shape {mask.shape} doesn't match target {target_shape}, resampling...")
