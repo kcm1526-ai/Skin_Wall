@@ -1,6 +1,12 @@
 """
 Dataset module for Skin and Abdominal Wall Segmentation
 Handles DICOM loading, NIfTI mask loading, preprocessing, and augmentation
+
+Features:
+- Direct DICOM loading (no cache required)
+- Voxel spacing resampling to target spacing
+- Automatic mask alignment (NIfTI to DICOM coordinate system)
+- Wall contour filling (converts outline to solid region)
 """
 
 import os
@@ -14,7 +20,7 @@ from torch.utils.data import Dataset, DataLoader
 import nibabel as nib
 import pydicom
 from scipy import ndimage
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, binary_fill_holes
 import SimpleITK as sitk
 from monai.transforms import (
     Compose, LoadImaged, EnsureChannelFirstd, Spacingd, Orientationd,
@@ -296,6 +302,12 @@ def prepare_data_dict(samples: List[Dict]) -> List[Dict]:
 class SkinWallDataset(Dataset):
     """
     Custom dataset for Skin and Abdominal Wall segmentation
+
+    Features:
+    - Direct DICOM loading (no cache required)
+    - Voxel spacing resampling to target spacing
+    - Automatic mask alignment (NIfTI to DICOM coordinate system)
+    - Wall contour filling (converts outline to solid region)
     """
 
     def __init__(
@@ -324,91 +336,125 @@ class SkinWallDataset(Dataset):
         self.cached_data = {}
         self.training_mode = training_mode  # 'both', 'skin', or 'wall'
 
-        # Check for numpy cache directory
-        self.numpy_cache_dir = os.path.join(config.data.base_path, '_numpy_cache')
-        self.use_numpy_cache = os.path.isdir(self.numpy_cache_dir)
-        if self.use_numpy_cache:
-            logger.info(f"Using numpy cache from {self.numpy_cache_dir}")
-        else:
-            logger.info(f"No numpy cache found. Run 'python scripts/precache_data.py' for faster loading.")
+        # Target spacing for resampling (from config)
+        self.target_spacing = config.preprocess.target_spacing
 
         logger.info(f"Initialized {mode} dataset with {len(data_list)} samples")
+        logger.info(f"Target voxel spacing: {self.target_spacing} mm")
+        logger.info(f"Training mode: {training_mode}")
 
     def __len__(self) -> int:
         return len(self.data_list)
 
-    def _load_from_numpy_cache(self, subject_id: str) -> Optional[Dict]:
-        """Try to load sample from numpy cache."""
-        # Try .npy first (faster, uncompressed), then .npz (legacy)
-        npy_path = os.path.join(self.numpy_cache_dir, f"{subject_id}.npy")
-        npz_path = os.path.join(self.numpy_cache_dir, f"{subject_id}.npz")
+    def _resample_volume(self, volume: np.ndarray, current_spacing: Tuple,
+                         target_spacing: Tuple, order: int = 1) -> np.ndarray:
+        """
+        Resample volume to target voxel spacing.
 
-        if os.path.exists(npy_path):
-            cache_path = npy_path
-            use_npy = True
-        elif os.path.exists(npz_path):
-            cache_path = npz_path
-            use_npy = False
-        else:
-            return None
+        Args:
+            volume: 3D numpy array (Z, Y, X)
+            current_spacing: Current voxel spacing (X, Y, Z) in mm
+            target_spacing: Target voxel spacing (X, Y, Z) in mm
+            order: Interpolation order (0=nearest, 1=linear, 3=cubic)
 
-        try:
-            if use_npy:
-                # .npy format - load dict directly (fastest)
-                data = np.load(cache_path, allow_pickle=True).item()
-                image = data['image']
-                skin_mask = data['skin_mask']
-                abdominal_mask = data['abdominal_mask']
-                spacing = tuple(data['spacing'])
-            else:
-                # .npz format - use mmap for memory efficiency
-                data = np.load(cache_path, mmap_mode='r')
-                image = np.array(data['image'])
-                skin_mask = np.array(data['skin_mask'])
-                abdominal_mask = np.array(data['abdominal_mask'])
-                spacing = tuple(data['spacing'])
+        Returns:
+            Resampled volume
+        """
+        # Calculate zoom factors (spacing is X,Y,Z but volume is Z,Y,X)
+        # So we need to reverse the spacing order
+        current_spacing_zyx = (current_spacing[2], current_spacing[1], current_spacing[0])
+        target_spacing_zyx = (target_spacing[2], target_spacing[1], target_spacing[0])
 
-            # Ensure masks have same shape as image
-            if skin_mask.shape != image.shape:
-                skin_mask = self._align_mask_to_image(skin_mask, image.shape)
-            if abdominal_mask.shape != image.shape:
-                abdominal_mask = self._align_mask_to_image(abdominal_mask, image.shape)
+        zoom_factors = [c / t for c, t in zip(current_spacing_zyx, target_spacing_zyx)]
 
-            # Create combined mask based on training mode
-            combined_mask = self._create_combined_mask(
-                image.shape, skin_mask, abdominal_mask
-            )
+        # Only resample if zoom factors are significantly different from 1
+        if all(0.95 < z < 1.05 for z in zoom_factors):
+            return volume
 
-            return {
-                'image': image,
-                'label': combined_mask,
-                'spacing': spacing,
-                'subject_id': subject_id
-            }
-        except Exception as e:
-            logger.warning(f"Failed to load from cache for {subject_id}: {e}")
-            return None
+        resampled = zoom(volume, zoom_factors, order=order)
+        return resampled
+
+    def _align_mask_to_image_always(self, mask: np.ndarray, target_shape: Tuple) -> np.ndarray:
+        """
+        Align NIfTI mask to DICOM image coordinate system.
+
+        ALWAYS applies transformation (transpose + flip) since NIfTI and DICOM
+        use different coordinate systems.
+
+        NIfTI: (X, Y, Z) orientation
+        DICOM: (Z, Y, X) orientation
+
+        Transformation: transpose(2, 1, 0) + flip(axis=0)
+        """
+        # Always apply transpose (2, 1, 0) first
+        transposed = np.transpose(mask, (2, 1, 0))
+
+        # Check if shape matches after transpose
+        if transposed.shape == target_shape:
+            # Apply flip for correct orientation
+            aligned = np.flip(transposed, axis=0)
+            return np.ascontiguousarray(aligned)
+
+        # If shapes don't match, try other permutations
+        for axes in [(2, 0, 1), (1, 2, 0), (0, 2, 1), (1, 0, 2), (0, 1, 2)]:
+            transposed = np.transpose(mask, axes)
+            if transposed.shape == target_shape:
+                aligned = np.flip(transposed, axis=0)
+                return np.ascontiguousarray(aligned)
+
+        # Fallback: resample to match shape
+        logger.warning(f"Mask shape {mask.shape} doesn't match target {target_shape}, resampling...")
+        zoom_factors = [t / s for t, s in zip(target_shape, mask.shape)]
+        resampled = zoom(mask.astype(np.float32), zoom_factors, order=0)
+        return resampled.astype(np.uint8)
+
+    def _fill_wall_contour(self, mask: np.ndarray) -> np.ndarray:
+        """
+        Fill the interior of a wall contour mask.
+
+        The wall mask is often just an outline/boundary. This fills
+        everything inside the closed contour to create a solid mask.
+
+        Args:
+            mask: 3D binary mask where 1 = contour outline
+
+        Returns:
+            3D binary mask where 1 = filled interior (including contour)
+        """
+        filled = np.zeros_like(mask)
+
+        # Process slice by slice (axial slices)
+        for z in range(mask.shape[0]):
+            slice_2d = mask[z, :, :]
+            if slice_2d.max() > 0:  # Only process slices with contour
+                filled[z, :, :] = binary_fill_holes(slice_2d).astype(np.uint8)
+
+        return filled
 
     def _load_sample(self, idx: int) -> Dict:
-        """Load and preprocess a single sample"""
+        """
+        Load and preprocess a single sample directly from DICOM.
+
+        Steps:
+        1. Load DICOM image
+        2. Load NIfTI masks
+        3. Align masks to DICOM coordinate system (transpose + flip)
+        4. Fill wall contour (if training wall)
+        5. Resample to target voxel spacing
+        6. Create combined mask
+        """
         sample = self.data_list[idx]
         subject_id = sample['subject_id']
 
-        # Try numpy cache first (much faster)
-        if self.use_numpy_cache:
-            cached = self._load_from_numpy_cache(subject_id)
-            if cached is not None:
-                return cached
-
-        # Fall back to DICOM loading
-        # Load DICOM images
+        # Step 1: Load DICOM images
         try:
             image, image_meta = DICOMLoader.load_dicom_series(sample['image_dir'])
+            current_spacing = image_meta['spacing']  # (X, Y, Z) in mm
         except Exception as e:
             logger.error(f"Error loading DICOM for {subject_id}: {e}")
             raise
 
-        # Load masks
+        # Step 2: Load NIfTI masks
         try:
             skin_mask, _ = MaskLoader.load_nifti_mask(sample['skin_mask'])
             abdominal_mask, _ = MaskLoader.load_nifti_mask(sample['abdominal_wall_mask'])
@@ -416,23 +462,33 @@ class SkinWallDataset(Dataset):
             logger.error(f"Error loading masks for {subject_id}: {e}")
             raise
 
-        # Ensure masks have same shape as image
-        # Masks might need to be transposed or resampled
-        if skin_mask.shape != image.shape:
-            # Try to match dimensions
-            skin_mask = self._align_mask_to_image(skin_mask, image.shape)
-        if abdominal_mask.shape != image.shape:
-            abdominal_mask = self._align_mask_to_image(abdominal_mask, image.shape)
+        # Step 3: Align masks to DICOM coordinate system (ALWAYS apply)
+        skin_mask = self._align_mask_to_image_always(skin_mask, image.shape)
+        abdominal_mask = self._align_mask_to_image_always(abdominal_mask, image.shape)
 
-        # Create combined mask based on training mode
+        # Step 4: Fill wall contour (converts outline to solid region)
+        abdominal_mask = self._fill_wall_contour(abdominal_mask)
+
+        # Step 5: Resample to target voxel spacing
+        image = self._resample_volume(
+            image, current_spacing, self.target_spacing, order=1  # Linear for image
+        )
+        skin_mask = self._resample_volume(
+            skin_mask, current_spacing, self.target_spacing, order=0  # Nearest for mask
+        ).astype(np.uint8)
+        abdominal_mask = self._resample_volume(
+            abdominal_mask, current_spacing, self.target_spacing, order=0
+        ).astype(np.uint8)
+
+        # Step 6: Create combined mask based on training mode
         combined_mask = self._create_combined_mask(
             image.shape, skin_mask, abdominal_mask
         )
 
         return {
-            'image': image,
+            'image': image.astype(np.float32),
             'label': combined_mask,
-            'spacing': image_meta['spacing'],
+            'spacing': self.target_spacing,
             'subject_id': subject_id
         }
 
