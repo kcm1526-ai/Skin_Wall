@@ -381,18 +381,24 @@ class SkinWallDataset(Dataset):
         ALWAYS applies transformation (transpose + flip) since NIfTI and DICOM
         use different coordinate systems.
 
-        NIfTI: (X, Y, Z) orientation
-        DICOM: (Z, Y, X) orientation
+        NIfTI: RAS+ (Right-Anterior-Superior), stored as (X, Y, Z)
+        DICOM/SimpleITK: LPS (Left-Posterior-Superior), stored as (Z, Y, X)
 
-        Transformation: transpose(2, 1, 0) + flip(axis=0)
+        Transformation: transpose(2, 1, 0) + flip(axis=0) + flip(axis=1)
+        - transpose: (X, Y, Z) -> (Z, Y, X)
+        - flip axis=0: Superior->Inferior (Z-axis slice order)
+        - flip axis=1: Anterior->Posterior (Y-axis vertical in axial view)
         """
         # Always apply transpose (2, 1, 0) first
         transposed = np.transpose(mask, (2, 1, 0))
 
         # Check if shape matches after transpose
         if transposed.shape == target_shape:
-            # Apply flip for correct orientation
+            # Apply flips for correct alignment
+            # axis=0: flip Z (slice order)
+            # axis=1: flip Y (vertical in axial view - fixes mask at bottom issue)
             aligned = np.flip(transposed, axis=0)
+            aligned = np.flip(aligned, axis=1)
             return np.ascontiguousarray(aligned)
 
         # If shapes don't match, try other permutations
@@ -400,6 +406,7 @@ class SkinWallDataset(Dataset):
             transposed = np.transpose(mask, axes)
             if transposed.shape == target_shape:
                 aligned = np.flip(transposed, axis=0)
+                aligned = np.flip(aligned, axis=1)
                 return np.ascontiguousarray(aligned)
 
         # Fallback: resample to match shape
