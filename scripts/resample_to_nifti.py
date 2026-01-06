@@ -160,7 +160,8 @@ def resample_volume(volume: np.ndarray, current_spacing: tuple,
     return resampled
 
 
-def save_as_nifti(volume: np.ndarray, spacing: tuple, output_path: str):
+def save_as_nifti(volume: np.ndarray, spacing: tuple, output_path: str,
+                  origin: tuple = None, direction: tuple = None):
     """
     Save numpy array as NIfTI file.
 
@@ -168,9 +169,25 @@ def save_as_nifti(volume: np.ndarray, spacing: tuple, output_path: str):
         volume: 3D numpy array (Z, Y, X)
         spacing: Voxel spacing (X, Y, Z) in mm
         output_path: Output file path
+        origin: Image origin (X, Y, Z) - physical coordinates of first voxel
+        direction: Direction cosine matrix (9 values) - orientation of axes
     """
     img_sitk = sitk.GetImageFromArray(volume)
-    img_sitk.SetSpacing((spacing[0], spacing[1], spacing[2]))
+    img_sitk.SetSpacing((float(spacing[0]), float(spacing[1]), float(spacing[2])))
+
+    # Set origin (default to (0, 0, 0) if not provided)
+    if origin is not None:
+        img_sitk.SetOrigin((float(origin[0]), float(origin[1]), float(origin[2])))
+    else:
+        img_sitk.SetOrigin((0.0, 0.0, 0.0))
+
+    # Set direction (default to identity matrix if not provided)
+    if direction is not None:
+        img_sitk.SetDirection(direction)
+    else:
+        # Identity direction matrix
+        img_sitk.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+
     sitk.WriteImage(img_sitk, output_path)
 
 
@@ -195,6 +212,8 @@ def process_subject(sample: dict, target_spacing: tuple, output_dir: str) -> dic
         # Step 1: Load DICOM image
         image, image_meta = DICOMLoader.load_dicom_series(sample['image_dir'])
         current_spacing = image_meta['spacing']  # (X, Y, Z)
+        origin = image_meta.get('origin', (0.0, 0.0, 0.0))  # (X, Y, Z)
+        direction = image_meta.get('direction', (1, 0, 0, 0, 1, 0, 0, 0, 1))  # 3x3 matrix flattened
         original_shape = image.shape
 
         # Step 2: Load masks
@@ -217,14 +236,14 @@ def process_subject(sample: dict, target_spacing: tuple, output_dir: str) -> dic
         skin_resampled = (skin_resampled > 0.5).astype(np.uint8)
         wall_resampled = (wall_resampled > 0.5).astype(np.uint8)
 
-        # Step 6: Save as NIfTI
+        # Step 6: Save as NIfTI (with origin and direction)
         image_path = os.path.join(subject_output_dir, f"{subject_id}_image.nii.gz")
         skin_path = os.path.join(subject_output_dir, f"{subject_id}_skin.nii.gz")
         wall_path = os.path.join(subject_output_dir, f"{subject_id}_wall.nii.gz")
 
-        save_as_nifti(image_resampled.astype(np.float32), target_spacing, image_path)
-        save_as_nifti(skin_resampled, target_spacing, skin_path)
-        save_as_nifti(wall_resampled, target_spacing, wall_path)
+        save_as_nifti(image_resampled.astype(np.float32), target_spacing, image_path, origin, direction)
+        save_as_nifti(skin_resampled, target_spacing, skin_path, origin, direction)
+        save_as_nifti(wall_resampled, target_spacing, wall_path, origin, direction)
 
         result['success'] = True
         result['original_spacing'] = current_spacing
