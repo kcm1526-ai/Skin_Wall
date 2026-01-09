@@ -197,9 +197,75 @@ class MaskLoader:
         return mask, metadata
 
 
+def find_preprocessed_data_paths(preprocessed_path: str) -> List[Dict]:
+    """
+    Find all preprocessed NIfTI samples.
+
+    Args:
+        preprocessed_path: Directory containing preprocessed folders
+
+    Returns:
+        List of dicts with 'subject_id', 'image', 'skin_mask', 'wall_mask' paths
+
+    Expected structure:
+        preprocessed_path/
+        ├── 01011ug_62/
+        │   ├── 01011ug_62_image.nii.gz
+        │   ├── 01011ug_62_skin.nii.gz
+        │   └── 01011ug_62_wall.nii.gz
+        └── ...
+    """
+    samples = []
+
+    # Find all subject folders
+    subject_dirs = sorted(glob.glob(os.path.join(preprocessed_path, '*')))
+
+    for subject_dir in subject_dirs:
+        if not os.path.isdir(subject_dir):
+            continue
+
+        subject_id = os.path.basename(subject_dir)
+
+        # Skip hidden directories and log files
+        if subject_id.startswith('.') or subject_id.endswith('.txt'):
+            continue
+
+        # Find NIfTI files in folder
+        nii_files = glob.glob(os.path.join(subject_dir, '*.nii.gz'))
+
+        image_file = None
+        skin_file = None
+        wall_file = None
+
+        for f in nii_files:
+            basename = os.path.basename(f)
+            if '_image.nii.gz' in basename:
+                image_file = f
+            elif '_skin.nii.gz' in basename:
+                skin_file = f
+            elif '_wall.nii.gz' in basename:
+                wall_file = f
+
+        # Only include if all files are found
+        if all([image_file, skin_file, wall_file]):
+            samples.append({
+                'subject_id': subject_id,
+                'image': image_file,
+                'skin_mask': skin_file,
+                'wall_mask': wall_file,
+                'preprocessed': True
+            })
+            logger.debug(f"Found preprocessed sample: {subject_id}")
+        else:
+            logger.warning(f"Missing files for {subject_id}: image={image_file is not None}, skin={skin_file is not None}, wall={wall_file is not None}")
+
+    logger.info(f"Total preprocessed samples found: {len(samples)}")
+    return samples
+
+
 def find_data_paths(base_path: str, config) -> List[Dict]:
     """
-    Find all valid data samples with images and masks
+    Find all valid data samples with images and masks (original DICOM data)
 
     Args:
         base_path: Base directory containing subject folders
@@ -304,6 +370,7 @@ class SkinWallDataset(Dataset):
     Custom dataset for Skin and Abdominal Wall segmentation
 
     Features:
+    - Supports preprocessed NIfTI files (recommended, faster)
     - Direct DICOM loading (no cache required)
     - Voxel spacing resampling to target spacing
     - Automatic mask alignment (NIfTI to DICOM coordinate system)
@@ -339,7 +406,11 @@ class SkinWallDataset(Dataset):
         # Target spacing for resampling (from config)
         self.target_spacing = config.preprocess.target_spacing
 
+        # Check if using preprocessed data
+        self.use_preprocessed = len(data_list) > 0 and data_list[0].get('preprocessed', False)
+
         logger.info(f"Initialized {mode} dataset with {len(data_list)} samples")
+        logger.info(f"Using preprocessed data: {self.use_preprocessed}")
         logger.info(f"Target voxel spacing: {self.target_spacing} mm")
         logger.info(f"Training mode: {training_mode}")
 
@@ -500,6 +571,60 @@ class SkinWallDataset(Dataset):
         return filled
 
     def _load_sample(self, idx: int) -> Dict:
+        """
+        Load a single sample. Automatically detects preprocessed vs raw data.
+        """
+        sample = self.data_list[idx]
+
+        if self.use_preprocessed or sample.get('preprocessed', False):
+            return self._load_preprocessed_sample(idx)
+        else:
+            return self._load_dicom_sample(idx)
+
+    def _load_preprocessed_sample(self, idx: int) -> Dict:
+        """
+        Load a preprocessed sample from NIfTI files.
+
+        Preprocessed data is already:
+        - Resampled to target spacing
+        - Aligned (masks match image orientation)
+        - Wall contours filled
+        """
+        sample = self.data_list[idx]
+        subject_id = sample['subject_id']
+
+        try:
+            # Load image
+            image_sitk = sitk.ReadImage(sample['image'])
+            image = sitk.GetArrayFromImage(image_sitk).astype(np.float32)
+
+            # Load masks
+            skin_sitk = sitk.ReadImage(sample['skin_mask'])
+            skin_mask = sitk.GetArrayFromImage(skin_sitk).astype(np.uint8)
+
+            wall_sitk = sitk.ReadImage(sample['wall_mask'])
+            wall_mask = sitk.GetArrayFromImage(wall_sitk).astype(np.uint8)
+
+            # Get spacing from image
+            spacing = image_sitk.GetSpacing()  # (X, Y, Z)
+
+        except Exception as e:
+            logger.error(f"Error loading preprocessed data for {subject_id}: {e}")
+            raise
+
+        # Create combined mask based on training mode
+        combined_mask = self._create_combined_mask(
+            image.shape, skin_mask, wall_mask
+        )
+
+        return {
+            'image': image,
+            'label': combined_mask,
+            'spacing': spacing,
+            'subject_id': subject_id
+        }
+
+    def _load_dicom_sample(self, idx: int) -> Dict:
         """
         Load and preprocess a single sample directly from DICOM.
 
@@ -777,8 +902,13 @@ def create_dataloaders(config, num_workers: int = 8, training_mode: str = 'both'
     Returns:
         Tuple of (train_loader, val_loader, test_loader)
     """
-    # Find all data samples
-    samples = find_data_paths(config.data.base_path, config)
+    # Find all data samples - use preprocessed data if configured
+    if config.data.use_preprocessed:
+        logger.info(f"Using preprocessed data from: {config.data.preprocessed_path}")
+        samples = find_preprocessed_data_paths(config.data.preprocessed_path)
+    else:
+        logger.info(f"Using raw DICOM data from: {config.data.base_path}")
+        samples = find_data_paths(config.data.base_path, config)
 
     if len(samples) == 0:
         raise ValueError("No valid data samples found!")

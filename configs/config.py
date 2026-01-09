@@ -10,19 +10,25 @@ from typing import List, Tuple, Optional
 @dataclass
 class DataConfig:
     """Data configuration"""
-    # Base data path
+    # Base data path (original DICOM data)
     base_path: str = "/raid/users/ai_kcm_0/skin_and_wall/01011_SEV_sale"
 
-    # Image paths pattern (relative to each subject folder)
+    # Preprocessed NIfTI data path (resampled + flipped)
+    preprocessed_path: str = "/raid/users/ai_kcm_0/skin_wall_flipped"
+
+    # Use preprocessed data (if True, loads from preprocessed_path)
+    use_preprocessed: bool = True
+
+    # Image paths pattern (relative to each subject folder) - for original DICOM
     image_subpath: str = "01_DICOM/PP"
 
-    # Primary mask paths
+    # Primary mask paths - for original DICOM
     primary_mask_subpath: str = "01_DICOM/PP/Mask"
 
-    # Alternative mask paths
+    # Alternative mask paths - for original DICOM
     alt_mask_subpath: str = "03_Vein"
 
-    # Mask filenames
+    # Mask filenames - for original DICOM
     skin_mask_name: str = "Skin.nii.gz"
     abdominal_wall_mask_name: str = "Abdominal_wall.nii.gz"
     # Alternative naming (typo in original data)
