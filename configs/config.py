@@ -164,8 +164,10 @@ class TrainConfig:
 
     # Class weights for imbalanced data - HIGH weight for foreground
     # This prevents the CE component from pushing toward all-background
+    # For 'both' mode (3-class): [bg, skin, wall]
+    # For 'skin' or 'wall' mode (2-class): [bg, fg]
     use_class_weights: bool = True
-    class_weights: Optional[List[float]] = field(default_factory=lambda: [1.0, 50.0])  # [bg, fg] - 50x weight for foreground
+    class_weights: Optional[List[float]] = field(default_factory=lambda: [1.0, 30.0, 50.0])  # [bg, skin, wall]
 
     # Gradient accumulation
     accumulation_steps: int = 4

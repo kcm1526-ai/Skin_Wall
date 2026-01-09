@@ -226,7 +226,7 @@ class Trainer:
             ).tolist()
             self.logger.info(f"Class weights: {self.config.train.class_weights}")
 
-        self.loss_fn = get_loss_function(self.config).to(self.device)
+        self.loss_fn = get_loss_function(self.config, num_classes=self.config.data.num_classes).to(self.device)
 
         # Metrics
         self.dice_metric = DiceMetric(
