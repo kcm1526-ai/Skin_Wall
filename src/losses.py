@@ -481,12 +481,13 @@ def compute_class_weights(
     return weights
 
 
-def get_loss_function(config) -> nn.Module:
+def get_loss_function(config, num_classes: int = None) -> nn.Module:
     """
     Create loss function from config
 
     Args:
         config: Training configuration
+        num_classes: Number of output classes (2 for binary, 3 for both mode)
 
     Returns:
         Loss function module
@@ -508,6 +509,18 @@ def get_loss_function(config) -> nn.Module:
     if 'gdc' in loss_type:
         gdc_weight = getattr(config.train, 'gdc_weight', 1.0)
 
+    # Adjust class weights for the number of classes
+    class_weights = config.train.class_weights
+    if class_weights and num_classes:
+        if len(class_weights) != num_classes:
+            # Adjust weights to match num_classes
+            if num_classes == 2:
+                # Binary mode: use [bg, fg] weights
+                class_weights = [class_weights[0], max(class_weights[1:])]
+            elif num_classes == 3 and len(class_weights) == 2:
+                # Both mode but only 2 weights provided: [bg, skin, wall]
+                class_weights = [class_weights[0], class_weights[1], class_weights[1]]
+
     # Create combined loss
     base_loss = CombinedLoss(
         dice_weight=dice_weight,
@@ -515,7 +528,7 @@ def get_loss_function(config) -> nn.Module:
         focal_weight=focal_weight,
         gdc_weight=gdc_weight,
         focal_gamma=config.train.focal_gamma,
-        class_weights=config.train.class_weights,
+        class_weights=class_weights,
         include_background=True
     )
 
