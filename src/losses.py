@@ -391,7 +391,8 @@ class DeepSupervisionLoss(nn.Module):
     """
     Loss wrapper for deep supervision
 
-    Applies loss to main output and intermediate outputs with decreasing weights
+    Applies loss to main output and intermediate outputs with decreasing weights.
+    Automatically downsamples target to match each output's spatial resolution.
     """
 
     def __init__(
@@ -411,6 +412,49 @@ class DeepSupervisionLoss(nn.Module):
             weights = [w / total for w in weights]
 
         self.weights = weights
+
+    def _downsample_target(self, target: torch.Tensor, output_shape: Tuple[int, ...]) -> torch.Tensor:
+        """
+        Downsample target to match output spatial dimensions.
+
+        Args:
+            target: Target tensor of shape (B, D, H, W) or (B, 1, D, H, W)
+            output_shape: Output tensor shape (B, C, D', H', W')
+
+        Returns:
+            Downsampled target matching output spatial dimensions
+        """
+        # Get target spatial shape
+        if target.dim() == 5:
+            target_spatial = target.shape[2:]  # (D, H, W)
+        else:
+            target_spatial = target.shape[1:]  # (D, H, W)
+
+        # Get output spatial shape
+        output_spatial = output_shape[2:]  # (D', H', W')
+
+        # Check if downsampling is needed
+        if target_spatial == output_spatial:
+            return target
+
+        # Downsample using nearest neighbor interpolation (preserves label values)
+        if target.dim() == 4:
+            # Add channel dimension for interpolation
+            target_5d = target.unsqueeze(1).float()
+        else:
+            target_5d = target.float()
+
+        # Use nearest neighbor to preserve discrete labels
+        downsampled = F.interpolate(
+            target_5d,
+            size=output_spatial,
+            mode='nearest'
+        )
+
+        if target.dim() == 4:
+            downsampled = downsampled.squeeze(1)
+
+        return downsampled.long()
 
     def forward(
         self,
@@ -435,12 +479,15 @@ class DeepSupervisionLoss(nn.Module):
         total_loss = 0.0
 
         for i, (output, weight) in enumerate(zip(deep_outputs, self.weights)):
+            # Downsample target to match output spatial dimensions
+            target_ds = self._downsample_target(target, output.shape)
+
             if isinstance(self.loss_fn, CombinedLoss):
-                loss, sub_loss_dict = self.loss_fn(output, target)
+                loss, sub_loss_dict = self.loss_fn(output, target_ds)
                 for k, v in sub_loss_dict.items():
                     loss_dict[f'{k}_ds{i}'] = v
             else:
-                loss = self.loss_fn(output, target)
+                loss = self.loss_fn(output, target_ds)
                 loss_dict[f'loss_ds{i}'] = loss.item()
 
             total_loss = total_loss + weight * loss
