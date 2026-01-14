@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, Tuple
 from .unet3d import UNet3D, ResUNet3D, AttentionUNet3D
 from .unetr import UNETR
 from .swin_unetr import SwinUNETR, get_swin_unetr_monai
+from .dense_unet3d import DenseUNet3D, DenseUNet3DSmall, DenseUNet3DLarge
 
 
 MODEL_REGISTRY = {
@@ -17,6 +18,9 @@ MODEL_REGISTRY = {
     'attention_unet3d': AttentionUNet3D,
     'unetr': UNETR,
     'swin_unetr': SwinUNETR,
+    'dense_unet3d': DenseUNet3D,
+    'dense_unet3d_small': DenseUNet3DSmall,
+    'dense_unet3d_large': DenseUNet3DLarge,
 }
 
 
@@ -113,6 +117,34 @@ def create_model(
             out_channels=out_channels,
             feature_size=kwargs.get('feature_size', 48),
             use_checkpoint=kwargs.get('use_checkpoint', True),
+            use_deep_supervision=kwargs.get('use_deep_supervision', True)
+        )
+
+    elif model_type == 'dense_unet3d':
+        model = DenseUNet3D(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            init_features=kwargs.get('init_features', 48),
+            growth_rate=kwargs.get('growth_rate', 12),
+            block_config=kwargs.get('block_config', (4, 4, 4, 4)),
+            bn_size=kwargs.get('bn_size', 4),
+            dropout=kwargs.get('dropout', 0.1),
+            use_deep_supervision=kwargs.get('use_deep_supervision', True)
+        )
+
+    elif model_type == 'dense_unet3d_small':
+        model = DenseUNet3DSmall(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            dropout=kwargs.get('dropout', 0.1),
+            use_deep_supervision=kwargs.get('use_deep_supervision', True)
+        )
+
+    elif model_type == 'dense_unet3d_large':
+        model = DenseUNet3DLarge(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            dropout=kwargs.get('dropout', 0.1),
             use_deep_supervision=kwargs.get('use_deep_supervision', True)
         )
 
